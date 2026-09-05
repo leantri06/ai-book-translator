@@ -4,13 +4,15 @@ Handles background translation jobs, chunk-by-chunk auto-saving, pause/resume, a
 """
 import threading
 import time
+import math
+import re
 import logging
 from typing import Dict, List, Optional
 from dataclasses import asdict
 
 from core.parser import BookProject, BookChapter, BookParagraph
 from core.chunker import ParagraphChunker, TranslationChunk
-from core.translator import AITranslator
+from core.translator import AITranslator, RateLimitError
 from core.glossary import BookGlossary
 from server.database import ProjectManager
 
@@ -148,7 +150,7 @@ class TranslationWorker:
                 self.add_log(project_id, "success", "Tất cả các chương đã được dịch hoàn tất!")
                 return
 
-            chunker = ParagraphChunker(target_word_count=500, max_paragraphs=6)
+            chunker = ParagraphChunker(target_word_count=1000, max_paragraphs=12)
 
             for chap in chapters_to_process:
                 if stop_event.is_set():
@@ -166,26 +168,60 @@ class TranslationWorker:
                 chunks = chunker.create_chunks(chap, only_pending=True)
                 total_chunks = len(chunks)
 
+                if not chunks:
+                    self.add_log(project_id, "info", f"Chương '{chap.title}' đã hoàn tất (không còn đoạn nào cần dịch).")
+                    continue
+
                 for chunk_idx, chunk in enumerate(chunks):
                     if stop_event.is_set():
                         break
 
-                    self.add_log(project_id, "info", f"[{chap.title[:20]}] Đang dịch đoạn {chunk_idx + 1}/{total_chunks} ({chunk.total_words} từ)...")
+                    self.add_log(project_id, "info", f"[{chap.title[:20]}] Đang dịch đoạn {chunk_idx + 1}/{total_chunks} ({chunk.total_words} từ, {len(chunk.paragraphs)} đoạn con)...")
 
-                    # Call AI Translation
-                    try:
-                        translated_map = translator.translate_chunk(chunk, glossary)
-                    except Exception as e:
-                        logger.error(f"Translation chunk error: {e}")
-                        self.add_log(project_id, "error", f"Lỗi gọi AI: {str(e)}. Thử lại sau 2s...")
-                        time.sleep(2)
+                    # Call AI Translation with Adaptive Rate-Limit Backoff
+                    translated_map = None
+                    max_attempts = 5
+
+                    for attempt in range(max_attempts):
                         if stop_event.is_set():
                             break
+
                         try:
                             translated_map = translator.translate_chunk(chunk, glossary)
-                        except Exception as e2:
-                            self.add_log(project_id, "error", f"Đoạn {chunk_idx + 1} gặp lỗi: {str(e2)}")
-                            continue
+                            break  # Success!
+                        except RateLimitError as rle:
+                            wait_s = max(5, int(math.ceil(rle.retry_after)))
+                            self.add_log(project_id, "warning",
+                                f"⏳ [Google Gemini Free Quota] Đã chạm giới hạn 15-20 lượt/phút của gói miễn phí. Tự động tạm dừng {wait_s}s để hồi quota...")
+                            for _ in range(wait_s):
+                                if stop_event.is_set():
+                                    break
+                                time.sleep(1)
+                            if stop_event.is_set():
+                                break
+                            self.add_log(project_id, "info", f"Hết thời gian chờ quota, tiếp tục dịch đoạn {chunk_idx + 1}...")
+                        except Exception as e:
+                            err_str = str(e)
+                            match = re.search(r'retry in ([0-9.]+)\s*s', err_str, re.IGNORECASE)
+                            if "429" in err_str or match or "quota" in err_str.lower():
+                                wait_s = int(math.ceil(float(match.group(1)))) + 2 if match else 35
+                                self.add_log(project_id, "warning",
+                                    f"⏳ [Google Gemini Free Quota] Đã chạm giới hạn lượt gọi. Tự động tạm dừng {wait_s}s để hồi quota...")
+                                for _ in range(wait_s):
+                                    if stop_event.is_set():
+                                        break
+                                    time.sleep(1)
+                                if stop_event.is_set():
+                                    break
+                                self.add_log(project_id, "info", f"Tiếp tục dịch đoạn {chunk_idx + 1}...")
+                            else:
+                                logger.error(f"Translation chunk error: {e}")
+                                self.add_log(project_id, "error", f"Lỗi gọi AI (lần {attempt + 1}/{max_attempts}): {err_str}")
+                                time.sleep(2)
+
+                    if not translated_map:
+                        self.add_log(project_id, "error", f"Đoạn {chunk_idx + 1} tạm thời bỏ qua sau nhiều lần thử. Các đoạn chưa dịch được giữ nguyên để dịch lại bất kỳ lúc nào.")
+                        continue
 
                     # Update chapter paragraphs
                     now_ts = time.time()
@@ -215,7 +251,12 @@ class TranslationWorker:
                         if len(st["updated_paragraphs"]) > 200:
                             st["updated_paragraphs"] = st["updated_paragraphs"][-200:]
 
-                    time.sleep(0.2)
+                    # Pacing delay between chunks to stay safely below 15 RPM
+                    pacing_delay = 3.5 if translator.provider == "gemini" else 1.0
+                    for _ in range(int(pacing_delay * 2)):
+                        if stop_event.is_set():
+                            break
+                        time.sleep(0.5)
 
                 self.add_log(project_id, "success", f"Hoàn thành chương: {chap.title} ({chap.progress_percent}%)")
 

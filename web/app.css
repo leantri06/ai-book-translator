@@ -826,6 +826,7 @@ body {
 }
 
 .log-line.info { color: #93c5fd; }
+.log-line.warning { color: #fde047; font-weight: 500; }
 .log-line.error { color: #f87171; }
 .log-line.success { color: #86efac; }
 

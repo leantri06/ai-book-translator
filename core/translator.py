@@ -34,6 +34,13 @@ Nhiệm vụ của bạn là dịch văn bản sách tiếng Anh sang tiếng Vi
 """
 
 
+class RateLimitError(RuntimeError):
+    """Raised when an API provider returns HTTP 429 (Rate limit / Quota exceeded)."""
+    def __init__(self, message: str, retry_after: float = 35.0):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
 class AITranslator:
     """Dispatches translation requests to the chosen provider."""
 
@@ -84,6 +91,8 @@ class AITranslator:
 
     def _translate_gemini(self, prompt: str, chunk: TranslationChunk) -> Dict[str, str]:
         """Calls Google Gemini API directly or via google-genai."""
+        import re
+
         # Fallback to direct REST API if no key is provided or for simplicity
         if not self.api_key:
             # If no API key, fall back to free translator
@@ -118,6 +127,20 @@ class AITranslator:
                 err_msg = err_json.get("error", {}).get("message", resp.text)
             except Exception:
                 pass
+
+            # Detect rate limits (429 or quota limits)
+            if resp.status_code == 429 or "quota" in err_msg.lower():
+                wait_sec = 35.0
+                match = re.search(r'retry in ([0-9.]+)\s*s', err_msg, re.IGNORECASE)
+                if match:
+                    wait_sec = float(match.group(1)) + 2.0
+                elif resp.headers.get("Retry-After"):
+                    try:
+                        wait_sec = float(resp.headers.get("Retry-After")) + 2.0
+                    except Exception:
+                        pass
+                raise RateLimitError(f"Lỗi Gemini API (429): {err_msg}", retry_after=wait_sec)
+
             raise RuntimeError(f"Lỗi Gemini API ({resp.status_code}): {err_msg}")
 
         data = resp.json()
@@ -158,6 +181,16 @@ class AITranslator:
                 err_msg = err_json.get("error", {}).get("message", resp.text)
             except Exception:
                 pass
+
+            if resp.status_code == 429:
+                wait_sec = 25.0
+                if resp.headers.get("Retry-After"):
+                    try:
+                        wait_sec = float(resp.headers.get("Retry-After")) + 2.0
+                    except Exception:
+                        pass
+                raise RateLimitError(f"Lỗi API (429): {err_msg}", retry_after=wait_sec)
+
             raise RuntimeError(f"Lỗi API ({resp.status_code}): {err_msg}")
 
         data = resp.json()
