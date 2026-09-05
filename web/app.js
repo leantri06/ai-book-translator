@@ -902,10 +902,14 @@ class BookTranslatorApp {
             this.settingsBaseUrl.value = 'http://localhost:11434/v1';
             this.groupApiKey.classList.add('hidden');
             select.innerHTML = `
-                <option value="qwen2.5:latest">qwen2.5:latest (Mô hình mã nguồn mở dịch tốt)</option>
-                <option value="llama3:latest">llama3:latest</option>
+                <option value="qwen2.5:7b">qwen2.5:7b (Khuyên dùng: Đã cài sẵn, dịch tiếng Việt xuất sắc nhất)</option>
+                <option value="qwen3.5:4b">qwen3.5:4b (Đã cài sẵn trên máy)</option>
+                <option value="qwen2.5vl:3b">qwen2.5vl:3b (Đã cài sẵn trên máy)</option>
                 <option value="custom">✏️ Nhập tên mô hình khác...</option>
             `;
+            if (this.modelHelpText) {
+                this.modelHelpText.innerHTML = '👉 <strong>qwen2.5:7b</strong> đã có sẵn trên máy của bạn và chạy mượt trên GTX 1070 (Offline 100%, không bao giờ hết quota).';
+            }
         } else if (provider === 'free_fallback') {
             this.groupBaseUrl.classList.add('hidden');
             this.groupApiKey.classList.add('hidden');
