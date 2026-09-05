@@ -113,7 +113,7 @@ class AITranslator:
 
         # Multi-model quota pool: if current model hits quota, try other high-performance models
         candidate_models = [self.model]
-        for alt in ("gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"):
+        for alt in ("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest", "gemini-3.7-flash"):
             if alt not in candidate_models:
                 candidate_models.append(alt)
 
@@ -157,8 +157,16 @@ class AITranslator:
                     for p in parts:
                         text_output += p.get("text", "")
 
-                from core.chunker import ParagraphChunker
-                return ParagraphChunker.parse_chunk_response(text_output, chunk)
+                    from core.chunker import ParagraphChunker
+                    parsed = ParagraphChunker.parse_chunk_response(text_output, chunk)
+                    if parsed and len(parsed) > 0:
+                        return parsed
+
+                # If Google safety filter blocked (PROHIBITED_CONTENT) or response parsed empty:
+                # Fallback to Google Translate engine so no paragraphs are ever lost or skipped!
+                fallback_res = self._translate_free_fallback(chunk)
+                if fallback_res and len(fallback_res) > 0:
+                    return fallback_res
 
             err_msg = resp.text
             try:
@@ -188,6 +196,14 @@ class AITranslator:
                 continue
 
             last_err = RuntimeError(f"Lỗi Gemini API ({resp.status_code}): {err_msg}")
+
+        # Safety net: If all AI models hit quota/errors, translate via free engine to guarantee 100% completion
+        try:
+            fallback_res = self._translate_free_fallback(chunk)
+            if fallback_res and len(fallback_res) > 0:
+                return fallback_res
+        except Exception:
+            pass
 
         if isinstance(last_err, (RateLimitError, DailyQuotaError)):
             raise last_err
