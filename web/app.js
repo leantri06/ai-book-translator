@@ -207,6 +207,10 @@ class BookTranslatorApp {
         if (this.settingsApiKey) {
             this.settingsApiKey.addEventListener('input', () => this.updateApiKeyCounter());
         }
+        const btnCheckQuota = document.getElementById('btnCheckQuota');
+        if (btnCheckQuota) {
+            btnCheckQuota.addEventListener('click', () => this.checkQuota());
+        }
         this.btnSaveSettings.addEventListener('click', () => this.saveSettings());
 
         // File Upload Dropzone
@@ -1041,6 +1045,97 @@ class BookTranslatorApp {
             this.hideModal(this.settingsModal);
         } catch (e) {
             this.appendLog('error', `Lỗi lưu cấu hình: ${e.message}`);
+        }
+    }
+
+    async checkQuota() {
+        const btn = document.getElementById('btnCheckQuota');
+        const spinner = document.getElementById('quotaCheckSpinner');
+        const container = document.getElementById('quotaCheckResults');
+        const rawApiKey = (this.settingsApiKey.value || '').trim();
+
+        if (!rawApiKey) {
+            alert('Vui lòng dán ít nhất 1 API Key vào ô trước khi kiểm tra.');
+            return;
+        }
+
+        if (btn) btn.disabled = true;
+        if (spinner) spinner.style.display = 'inline-block';
+        if (container) {
+            container.style.display = 'block';
+            container.innerHTML = '<div style="padding: 10px; text-align: center; color: #94a3b8; font-size: 0.82rem;">⏳ Đang kết nối và kiểm tra hạn mức các Key...</div>';
+        }
+
+        try {
+            const res = await fetch('/api/settings/check-quota', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    provider: this.settingsProvider.value,
+                    api_key: rawApiKey,
+                    base_url: this.settingsBaseUrl.value.trim()
+                })
+            });
+
+            const data = await res.json();
+            if (data.status === 'empty' || !data.keys || data.keys.length === 0) {
+                container.innerHTML = `<div style="padding: 8px; color: #f87171; font-size: 0.8rem;">${data.message || 'Không có key nào để kiểm tra.'}</div>`;
+                return;
+            }
+
+            let html = `<div style="font-size: 0.8rem; font-weight: 600; color: #e2e8f0; margin-bottom: 6px; display: flex; justify-content: space-between;">
+                <span>📋 Kết quả kiểm tra (${data.keys.length} Keys):</span>
+                <span style="color: #94a3b8; font-weight: normal; cursor: pointer;" onclick="document.getElementById('quotaCheckResults').style.display='none'">✕ Đóng</span>
+            </div>`;
+
+            data.keys.forEach(k => {
+                let badgeText = '🟢 Sẵn sàng';
+                let badgeBg = 'rgba(34, 197, 94, 0.15)';
+                let badgeColor = '#4ade80';
+
+                if (k.status === 'daily_limit') {
+                    badgeText = '🟠 Hết hạn mức 24h';
+                    badgeBg = 'rgba(249, 115, 22, 0.15)';
+                    badgeColor = '#fb923c';
+                } else if (k.status === 'rpm_wait') {
+                    badgeText = '🟡 Chờ hồi lượt (15 RPM)';
+                    badgeBg = 'rgba(234, 179, 8, 0.15)';
+                    badgeColor = '#facc15';
+                } else if (k.status === 'error') {
+                    badgeText = '🔴 Lỗi / Không hợp lệ';
+                    badgeBg = 'rgba(239, 68, 68, 0.15)';
+                    badgeColor = '#f87171';
+                }
+
+                let modelsHtml = '';
+                if (k.models && k.models.length > 0) {
+                    modelsHtml = `<div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">` +
+                        k.models.map(m => {
+                            let dot = m.status === 'ok' ? '🟢' : (m.status === 'daily_limit' ? '🟠' : (m.status === 'rpm_wait' ? '🟡' : '🔴'));
+                            return `<span style="font-size: 0.7rem; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 4px; color: #cbd5e1;">${dot} ${m.model}: ${m.text}</span>`;
+                        }).join('') + `</div>`;
+                }
+
+                html += `
+                <div style="padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 4px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <span style="font-weight: 600; color: #f1f5f9; font-size: 0.82rem;">Key #${k.key_index}</span>
+                            <span style="font-family: monospace; color: #94a3b8; font-size: 0.75rem; margin-left: 4px;">(${k.masked_key})</span>
+                        </div>
+                        <span style="background: ${badgeBg}; color: ${badgeColor}; font-size: 0.72rem; padding: 2px 7px; border-radius: 4px; font-weight: 500;">${badgeText}</span>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;">${k.summary}</div>
+                    ${modelsHtml}
+                </div>`;
+            });
+
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = `<div style="padding: 8px; color: #f87171; font-size: 0.8rem;">Lỗi kiểm tra: ${e.message}</div>`;
+        } finally {
+            if (btn) btn.disabled = false;
+            if (spinner) spinner.style.display = 'none';
         }
     }
 

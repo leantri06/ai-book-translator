@@ -320,6 +320,14 @@
                         <small class="helper-text" id="apiKeyHelp" style="margin-top: 6px;">
                             👉 Lấy Google Gemini API Key miễn phí tại: <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: #818cf8; text-decoration: underline;">Google AI Studio</a>. <em>Mẹo:</em> Dùng nhiều tài khoản Gmail để lấy nhiều key dán vào đây, dịch siêu tốc mà không lo chạm hạn mức!
                         </small>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
+                            <button type="button" id="btnCheckQuota" class="btn btn-secondary" style="padding: 5px 12px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
+                                <span>🔍</span> Kiểm tra Quota & Sức khỏe Key
+                            </button>
+                            <span id="quotaCheckSpinner" style="display: none; font-size: 0.78rem; color: #818cf8;">⏳ Đang kiểm tra từng Key...</span>
+                        </div>
+                        <div id="quotaCheckResults" style="display: none; margin-top: 8px; max-height: 220px; overflow-y: auto; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 6px 10px;">
+                        </div>
                     </div>
 
                     <div class="form-group" id="groupModel">

@@ -58,6 +58,12 @@ class GlossaryUpdateModel(BaseModel):
     terms: List[dict] = []
 
 
+class CheckQuotaModel(BaseModel):
+    provider: str = "gemini"
+    api_key: str = ""
+    base_url: str = ""
+
+
 # --- API Routes ---
 
 @app.get("/api/settings")
@@ -69,6 +75,109 @@ def get_settings():
 def save_settings(settings: SettingsModel):
     ProjectManager.save_settings(settings.dict())
     return {"status": "ok", "message": "Cấu hình API đã được lưu thành công."}
+
+
+@app.post("/api/settings/check-quota")
+def check_quota(data: CheckQuotaModel):
+    """Pings and evaluates quota, rate-limits, and health across all submitted API keys in parallel."""
+    import concurrent.futures
+    provider = data.provider.lower()
+    raw_keys = data.api_key.replace('\r', '\n').replace(';', ',').replace('\n', ',')
+    api_keys = [k.strip() for k in raw_keys.split(',') if k.strip()]
+    if not api_keys:
+        return {"status": "empty", "keys": [], "message": "Chưa nhập API Key nào."}
+
+    test_models = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.7-flash"]
+
+    def test_single_key(item):
+        idx, key = item
+        masked = key[:6] + "..." + key[-4:] if len(key) > 10 else "***"
+        res = {
+            "key_index": idx + 1,
+            "masked_key": masked,
+            "status": "ok",
+            "summary": "",
+            "models": []
+        }
+
+        if provider == "gemini":
+            has_ok = False
+            has_daily = False
+            has_rpm = False
+            all_invalid = True
+
+            for m in test_models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={key}"
+                try:
+                    r = requests.post(url, json={"contents": [{"parts": [{"text": "hi"}]}]}, timeout=10)
+                    if r.status_code == 200:
+                        has_ok = True
+                        all_invalid = False
+                        res["models"].append({"model": m, "status": "ok", "text": "Sẵn sàng (Còn Quota)"})
+                    elif r.status_code == 429:
+                        all_invalid = False
+                        err = r.json().get("error", {}).get("message", "")
+                        if "perday" in err.lower() or "per_day" in err.lower() or "generaterequestsperday" in err.lower():
+                            has_daily = True
+                            res["models"].append({"model": m, "status": "daily_limit", "text": "Hết lượt ngày (24h Quota)"})
+                        else:
+                            has_rpm = True
+                            res["models"].append({"model": m, "status": "rpm_wait", "text": "Chờ hồi lượt (15 RPM)"})
+                    elif r.status_code in (400, 403):
+                        res["models"].append({"model": m, "status": "invalid", "text": f"Key không hợp lệ ({r.status_code})"})
+                    else:
+                        res["models"].append({"model": m, "status": "other", "text": f"Mã lỗi {r.status_code}"})
+                except Exception:
+                    res["models"].append({"model": m, "status": "error", "text": "Lỗi kết nối"})
+
+            if all_invalid:
+                res["status"] = "error"
+                res["summary"] = "Key không hợp lệ hoặc bị khóa"
+            elif has_ok:
+                res["status"] = "ok"
+                res["summary"] = "Hoạt động tốt (Sẵn sàng dịch)"
+            elif has_daily:
+                res["status"] = "daily_limit"
+                res["summary"] = "Hết hạn mức 24h trên một số model"
+            elif has_rpm:
+                res["status"] = "rpm_wait"
+                res["summary"] = "Đang tạm chờ hồi lượt (15 RPM)"
+            else:
+                res["status"] = "warning"
+                res["summary"] = "Tạm thời không khả dụng"
+
+        elif provider in ("deepseek", "openai_compatible", "openrouter", "ollama", "openai"):
+            base_url = data.base_url.rstrip("/") if data.base_url else ("https://api.deepseek.com/v1" if provider == "deepseek" else "https://api.openai.com/v1")
+            url = f"{base_url}/models"
+            headers = {"Authorization": f"Bearer {key}"}
+            try:
+                r = requests.get(url, headers=headers, timeout=10)
+                if r.status_code == 200:
+                    res["status"] = "ok"
+                    res["summary"] = "Kết nối thành công (Key hợp lệ)"
+                elif r.status_code == 401:
+                    res["status"] = "error"
+                    res["summary"] = "API Key không hợp lệ (401)"
+                elif r.status_code == 429:
+                    res["status"] = "daily_limit"
+                    res["summary"] = "Hết số dư / Quota (429)"
+                else:
+                    res["status"] = "warning"
+                    res["summary"] = f"Phản hồi mã {r.status_code}"
+            except Exception:
+                res["status"] = "error"
+                res["summary"] = "Không thể kết nối đến server"
+
+        else:
+            res["status"] = "ok"
+            res["summary"] = "Chế độ dùng thử miễn phí (Không cần key)"
+
+        return res
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(api_keys), 8)) as executor:
+        results = list(executor.map(test_single_key, enumerate(api_keys)))
+
+    return {"status": "ok", "keys": results}
 
 
 @app.get("/api/projects")
