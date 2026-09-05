@@ -54,9 +54,9 @@ class AITranslator:
         # Default model selection & intelligent model aliasing
         if self.provider == "gemini":
             if not model or model in ("gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"):
-                self.model = "gemini-3.6-flash"
+                self.model = "gemini-3.5-flash"
             elif model in ("gemini-2.5-pro", "gemini-1.5-pro"):
-                self.model = "gemini-3.6-pro"
+                self.model = "gemini-3.1-pro-preview"
             else:
                 self.model = model
         elif self.provider in ("deepseek", "openai_compatible"):
@@ -90,7 +90,7 @@ class AITranslator:
             return self._translate_free_fallback(chunk)
 
     def _translate_gemini(self, prompt: str, chunk: TranslationChunk) -> Dict[str, str]:
-        """Calls Google Gemini API directly or via google-genai."""
+        """Calls Google Gemini API directly or via google-genai with auto-fallback between models."""
         import re
 
         # Fallback to direct REST API if no key is provided or for simplicity
@@ -98,29 +98,55 @@ class AITranslator:
             # If no API key, fall back to free translator
             return self._translate_free_fallback(chunk)
 
-        # Direct REST API to Gemini
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "contents": [
-                {
-                    "role": "user",
-                    "parts": [{"text": prompt}]
-                }
-            ],
-            "systemInstruction": {
-                "role": "system",
-                "parts": [{"text": LITERARY_SYSTEM_PROMPT}]
-            },
-            "generationConfig": {
-                "temperature": self.temperature,
-                "topP": 0.95,
-                "maxOutputTokens": 8192
-            }
-        }
+        # Multi-model quota pool: if current model hits quota, try other high-performance models
+        candidate_models = [self.model]
+        for alt in ("gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"):
+            if alt not in candidate_models:
+                candidate_models.append(alt)
 
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
-        if resp.status_code != 200:
+        last_err = None
+        last_wait_sec = 35.0
+
+        for model_name in candidate_models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self.api_key}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [
+                    {
+                        "role": "user",
+                        "parts": [{"text": prompt}]
+                    }
+                ],
+                "systemInstruction": {
+                    "role": "system",
+                    "parts": [{"text": LITERARY_SYSTEM_PROMPT}]
+                },
+                "generationConfig": {
+                    "temperature": self.temperature,
+                    "topP": 0.95,
+                    "maxOutputTokens": 8192
+                }
+            }
+
+            try:
+                resp = requests.post(url, headers=headers, json=payload, timeout=60)
+            except Exception as ex:
+                last_err = ex
+                continue
+
+            if resp.status_code == 200:
+                # Success!
+                data = resp.json()
+                text_output = ""
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    for p in parts:
+                        text_output += p.get("text", "")
+
+                from core.chunker import ParagraphChunker
+                return ParagraphChunker.parse_chunk_response(text_output, chunk)
+
             err_msg = resp.text
             try:
                 err_json = resp.json()
@@ -139,9 +165,18 @@ class AITranslator:
                         wait_sec = float(resp.headers.get("Retry-After")) + 2.0
                     except Exception:
                         pass
-                raise RateLimitError(f"Lỗi Gemini API (429): {err_msg}", retry_after=wait_sec)
+                last_wait_sec = wait_sec
+                last_err = RateLimitError(f"Lỗi Gemini API (429): {err_msg}", retry_after=wait_sec)
+                # Try next model in candidate_models before giving up!
+                continue
 
-            raise RuntimeError(f"Lỗi Gemini API ({resp.status_code}): {err_msg}")
+            last_err = RuntimeError(f"Lỗi Gemini API ({resp.status_code}): {err_msg}")
+
+        if isinstance(last_err, RateLimitError):
+            raise last_err
+        if last_err:
+            raise last_err
+        raise RuntimeError("Không thể nhận phản hồi từ Gemini API.")
 
         data = resp.json()
         text_output = ""
