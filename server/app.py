@@ -187,8 +187,8 @@ def update_paragraph(project_id: str, chapter_id: str, para_id: str, payload: Pa
 
 
 @app.post("/api/projects/{project_id}/translate/start")
-def start_translation(project_id: str, chapter_id: Optional[str] = None):
-    success = worker_instance.start_translation(project_id, chapter_id)
+def start_translation(project_id: str, chapter_id: Optional[str] = None, force: bool = False):
+    success = worker_instance.start_translation(project_id, chapter_id, force_retranslate=force)
     if not success:
         return {"status": "already_running", "message": "Tiến trình dịch đang chạy sẵn."}
     return {"status": "ok", "message": "Đã khởi động tiến trình dịch."}

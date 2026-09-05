@@ -88,7 +88,7 @@ class TranslationWorker:
                 if project_id in self._project_states:
                     self._project_states[project_id]["status_text"] = "Đang tạm dừng..."
 
-    def start_translation(self, project_id: str, chapter_id: Optional[str] = None) -> bool:
+    def start_translation(self, project_id: str, chapter_id: Optional[str] = None, force_retranslate: bool = False) -> bool:
         with self._lock:
             if self.is_running(project_id):
                 return False
@@ -96,7 +96,7 @@ class TranslationWorker:
             stop_event = threading.Event()
             thread = threading.Thread(
                 target=self._run_translation_loop,
-                args=(project_id, chapter_id, stop_event),
+                args=(project_id, chapter_id, stop_event, force_retranslate),
                 daemon=True
             )
             self._active_jobs[project_id] = {
@@ -110,7 +110,7 @@ class TranslationWorker:
             thread.start()
             return True
 
-    def _run_translation_loop(self, project_id: str, target_chapter_id: Optional[str], stop_event: threading.Event) -> None:
+    def _run_translation_loop(self, project_id: str, target_chapter_id: Optional[str], stop_event: threading.Event, force_retranslate: bool = False) -> None:
         """Background thread executing the translation work."""
         self.add_log(project_id, "info", "Khởi động phiên dịch...")
 
@@ -139,12 +139,24 @@ class TranslationWorker:
             if target_chapter_id:
                 chap = ProjectManager.load_chapter(project_id, target_chapter_id)
                 if chap:
+                    if force_retranslate:
+                        for p in chap.paragraphs:
+                            p.status = "pending"
+                            p.translated_text = ""
+                        ProjectManager.save_chapter(project_id, chap)
                     chapters_to_process.append(chap)
             else:
                 for c_meta in project.chapters:
                     c = ProjectManager.load_chapter(project_id, c_meta.id)
-                    if c and c.progress_percent < 100.0:
-                        chapters_to_process.append(c)
+                    if c:
+                        if force_retranslate:
+                            for p in c.paragraphs:
+                                p.status = "pending"
+                                p.translated_text = ""
+                            ProjectManager.save_chapter(project_id, c)
+                            chapters_to_process.append(c)
+                        elif c.progress_percent < 100.0:
+                            chapters_to_process.append(c)
 
             if not chapters_to_process:
                 self.add_log(project_id, "success", "Tất cả các chương đã được dịch hoàn tất!")

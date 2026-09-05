@@ -43,6 +43,7 @@ class BookTranslatorApp {
         this.tabReader = document.getElementById('tabReader');
         this.activeChapterTitle = document.getElementById('activeChapterTitle');
         this.btnTranslateCurrentChapter = document.getElementById('btnTranslateCurrentChapter');
+        this.btnRetranslateCurrentChapter = document.getElementById('btnRetranslateCurrentChapter');
         this.btnToggleRightSidebar = document.getElementById('btnToggleRightSidebar');
         this.studioView = document.getElementById('studioView');
         this.readerView = document.getElementById('readerView');
@@ -118,6 +119,18 @@ class BookTranslatorApp {
                 this.startTranslation(this.currentChapterId);
             }
         });
+        if (this.btnRetranslateCurrentChapter) {
+            this.btnRetranslateCurrentChapter.addEventListener('click', () => {
+                if (!this.currentChapterId) {
+                    alert('Vui lòng chọn một chương trước khi dịch lại.');
+                    return;
+                }
+                const chapTitle = this.currentChapter ? this.currentChapter.title : 'chương này';
+                if (confirm(`Bạn có chắc muốn xóa bản dịch cũ và dịch lại từ đầu "${chapTitle}" bằng mô hình AI hiện tại không?`)) {
+                    this.startTranslation(this.currentChapterId, true);
+                }
+            });
+        }
 
         // Search chapters
         this.chapterSearchInput.addEventListener('input', (e) => this.filterChapters(e.target.value));
@@ -611,20 +624,34 @@ class BookTranslatorApp {
 
     // --- TRANSLATION CONTROLS ---
 
-    async startTranslation(chapterId = null) {
+    async startTranslation(chapterId = null, force = false) {
         if (!this.currentProjectId) {
             alert('Vui lòng chọn một cuốn sách trước khi dịch.');
             return;
         }
 
-        let url = `/api/projects/${this.currentProjectId}/translate/start`;
-        if (chapterId) url += `?chapter_id=${chapterId}`;
+        const params = [];
+        if (chapterId) params.push(`chapter_id=${encodeURIComponent(chapterId)}`);
+        if (force) params.push('force=true');
+        const url = `/api/projects/${this.currentProjectId}/translate/start${params.length ? '?' + params.join('&') : ''}`;
 
         // Immediate UI feedback
         this.updateTranslatingStatus(true);
         const chapTitle = this.currentChapter ? this.currentChapter.title : (chapterId || '');
-        this.appendLog('info', chapterId ? `[Khởi động] Đang chuẩn bị dịch chương: ${chapTitle}...` : 'Đang chuẩn bị dịch toàn bộ sách...');
-        this.statusText.textContent = 'Đang khởi động phiên dịch...';
+        if (force) {
+            this.appendLog('info', `[Dịch lại] Đang xóa bản dịch cũ và dịch lại từ đầu: ${chapTitle}...`);
+            this.statusText.textContent = `Đang dịch lại từ đầu: ${chapTitle}...`;
+            // Clear current studio editors immediately if viewing this chapter
+            if (this.currentChapterId === chapterId) {
+                const editors = this.studioParagraphs.querySelectorAll('.para-vi-editor');
+                editors.forEach(ed => { ed.innerText = ''; });
+                const chips = this.studioParagraphs.querySelectorAll('.para-status-chip');
+                chips.forEach(ch => { ch.className = 'para-status-chip chip-pending'; ch.textContent = 'Chờ dịch'; });
+            }
+        } else {
+            this.appendLog('info', chapterId ? `[Khởi động] Đang chuẩn bị dịch chương: ${chapTitle}...` : 'Đang chuẩn bị dịch toàn bộ sách...');
+            this.statusText.textContent = 'Đang khởi động phiên dịch...';
+        }
 
         // Trigger polling immediately
         this.startStatusPolling(this.currentProjectId);
