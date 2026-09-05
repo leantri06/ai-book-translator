@@ -856,13 +856,13 @@ class BookTranslatorApp {
             this.groupBaseUrl.classList.add('hidden');
             this.groupApiKey.classList.remove('hidden');
             select.innerHTML = `
-                <option value="gemini-2.5-flash">gemini-2.5-flash (Khuyên dùng: Tốc độ cực nhanh, văn mượt, miễn phí)</option>
-                <option value="gemini-2.5-pro">gemini-2.5-pro (Chuyên sâu văn học, trau chuốt từng câu)</option>
-                <option value="gemini-1.5-flash">gemini-1.5-flash (Bản ổn định phổ thông)</option>
+                <option value="gemini-3.6-flash">gemini-3.6-flash (Tốc độ cao, dịch mượt mà, mặc định)</option>
+                <option value="gemini-3.6-pro">gemini-3.6-pro (Gemini Pro: Chuyên sâu văn học, văn phong đỉnh cao nhất của Google)</option>
+                <option value="gemini-2.5-pro">gemini-2.5-pro (Gemini Pro: Cực kỳ sâu sắc và trau chuốt)</option>
                 <option value="custom">✏️ Nhập tên mô hình khác...</option>
             `;
             if (this.modelHelpText) {
-                this.modelHelpText.innerHTML = '👉 Khuyên dùng: <strong>gemini-2.5-flash</strong> (Miễn phí 100%, dịch nhanh và mượt mà).';
+                this.modelHelpText.innerHTML = '👉 <strong>gemini-3.6-pro</strong> dịch văn học cực hay. <strong>gemini-3.6-flash</strong> dịch nhanh và tiết kiệm quota.';
             }
         } else if (provider === 'deepseek') {
             this.groupBaseUrl.classList.remove('hidden');
