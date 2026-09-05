@@ -236,98 +236,82 @@ class BookTranslatorApp {
         this.logCounterBadge.textContent = count;
     }
 
-    connectSSE(projectId) {
-        if (this.eventSource) {
-            this.eventSource.close();
-            this.eventSource = null;
+    startStatusPolling(projectId) {
+        if (this.pollTimer) {
+            clearInterval(this.pollTimer);
         }
+        this.lastPollTimestamp = 0;
 
-        const url = `/api/stream/${projectId}`;
-        this.eventSource = new EventSource(url);
+        const pollFunc = async () => {
+            if (!this.currentProjectId) return;
+            try {
+                const res = await fetch(`/api/projects/${this.currentProjectId}/status?since=${this.lastPollTimestamp}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                this.lastPollTimestamp = data.timestamp || (Date.now() / 1000);
 
-        this.eventSource.addEventListener('status_change', (e) => {
-            const data = JSON.parse(e.data);
-            this.updateTranslatingStatus(data.status === 'running');
-            this.statusText.textContent = data.message || (data.status === 'running' ? 'Đang dịch...' : 'Đã dừng');
-        });
-
-        this.eventSource.addEventListener('log', (e) => {
-            const data = JSON.parse(e.data);
-            this.appendLog(data.level || 'info', data.text);
-            this.footerCurrentChunk.textContent = data.text;
-        });
-
-        this.eventSource.addEventListener('chunk_done', (e) => {
-            const data = JSON.parse(e.data);
-            this.handleChunkDone(data);
-        });
-
-        this.eventSource.addEventListener('chapter_done', (e) => {
-            const data = JSON.parse(e.data);
-            this.appendLog('success', `Đã dịch xong chương: ${data.title} (Tiến độ: ${data.progress}%)`);
-            this.loadProjectDetails(this.currentProjectId, false);
-        });
-
-        this.eventSource.addEventListener('complete', (e) => {
-            const data = JSON.parse(e.data);
-            this.appendLog('success', data.message);
-            this.updateTranslatingStatus(false);
-            this.statusText.textContent = 'Đã hoàn tất toàn bộ sách!';
-            this.loadProjectDetails(this.currentProjectId, false);
-        });
-
-        this.eventSource.addEventListener('error', (e) => {
-            if (e.data) {
-                try {
-                    const data = JSON.parse(e.data);
-                    this.appendLog('error', data.message);
-                } catch (err) {}
-            }
-        });
-    }
-
-    handleChunkDone(data) {
-        // Update global progress bar
-        this.updateGlobalProgress(data.overall_progress);
-
-        // If currently viewing the updated chapter, update paragraph elements in real time!
-        if (this.currentChapterId === data.chapter_id) {
-            for (const p of data.updated_paragraphs) {
-                const pEl = document.getElementById(`para_${p.id}`);
-                if (pEl) {
-                    const editor = pEl.querySelector('.para-vi-editor');
-                    const chip = pEl.querySelector('.para-status-chip');
-                    if (editor && editor.innerText !== p.text) {
-                        editor.innerText = p.text;
-                        // Flash green animation
-                        editor.style.transition = 'background 0.3s ease';
-                        editor.style.background = 'rgba(16, 185, 129, 0.2)';
-                        setTimeout(() => { editor.style.background = 'transparent'; }, 600);
-                    }
-                    if (chip) {
-                        chip.className = 'para-status-chip chip-done';
-                        chip.textContent = 'Đã dịch';
-                    }
-                    pEl.classList.remove('translating');
+                // 1. Update running status
+                this.updateTranslatingStatus(data.is_running);
+                if (data.status_text) {
+                    this.statusText.textContent = data.status_text;
+                    this.footerCurrentChunk.textContent = data.status_text;
                 }
-            }
-        }
 
-        // Update chapter list progress badge
-        const chapBadge = document.getElementById(`chap_badge_${data.chapter_id}`);
-        if (chapBadge) {
-            chapBadge.textContent = `${data.chapter_progress}%`;
-            if (data.chapter_progress >= 100) {
-                chapBadge.className = 'chapter-badge badge-done';
-            } else {
-                chapBadge.className = 'chapter-badge badge-progress';
-            }
-        }
+                // 2. Add new logs
+                if (data.logs && data.logs.length > 0) {
+                    for (const l of data.logs) {
+                        this.appendLog(l.level || 'info', l.text);
+                    }
+                }
 
-        const miniFill = document.getElementById(`chap_fill_${data.chapter_id}`);
-        if (miniFill) {
-            miniFill.style.width = `${data.chapter_progress}%`;
-        }
+                // 3. Update overall progress
+                if (data.overall_progress !== undefined && data.overall_progress > 0) {
+                    this.updateGlobalProgress(data.overall_progress);
+                }
+
+                // 4. Update chapter progress badge & fill bar
+                if (data.chapter_id && data.chapter_progress !== undefined) {
+                    const chapBadge = document.getElementById(`chap_badge_${data.chapter_id}`);
+                    if (chapBadge) {
+                        chapBadge.textContent = `${data.chapter_progress}%`;
+                        chapBadge.className = data.chapter_progress >= 100 ? 'chapter-badge badge-done' : 'chapter-badge badge-progress';
+                    }
+                    const miniFill = document.getElementById(`chap_fill_${data.chapter_id}`);
+                    if (miniFill) {
+                        miniFill.style.width = `${data.chapter_progress}%`;
+                    }
+                }
+
+                // 5. Update paragraph editors in real time!
+                if (data.updated_paragraphs && data.updated_paragraphs.length > 0) {
+                    for (const p of data.updated_paragraphs) {
+                        if (this.currentChapterId === p.chapter_id) {
+                            const pEl = document.getElementById(`para_${p.id}`);
+                            if (pEl) {
+                                const editor = pEl.querySelector('.para-vi-editor');
+                                const chip = pEl.querySelector('.para-status-chip');
+                                if (editor && editor.innerText !== p.text) {
+                                    editor.innerText = p.text;
+                                    editor.style.transition = 'background 0.3s ease';
+                                    editor.style.background = 'rgba(16, 185, 129, 0.25)';
+                                    setTimeout(() => { editor.style.background = 'transparent'; }, 800);
+                                }
+                                if (chip) {
+                                    chip.className = 'para-status-chip chip-done';
+                                    chip.textContent = 'Đã dịch';
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                // Ignore transient network errors during polling
+            }
+        };
+
+        // Poll immediately and every 1.5s
+        pollFunc();
+        this.pollTimer = setInterval(pollFunc, 1500);
     }
 
     updateTranslatingStatus(running) {
@@ -380,7 +364,7 @@ class BookTranslatorApp {
 
         await this.loadProjectDetails(projectId, true);
         await this.loadGlossary(projectId);
-        this.connectSSE(projectId);
+        this.startStatusPolling(projectId);
     }
 
     async loadProjectDetails(projectId, autoSelectFirstChapter = true) {
@@ -610,22 +594,34 @@ class BookTranslatorApp {
     // --- TRANSLATION CONTROLS ---
 
     async startTranslation(chapterId = null) {
-        if (!this.currentProjectId) return;
+        if (!this.currentProjectId) {
+            alert('Vui lòng chọn một cuốn sách trước khi dịch.');
+            return;
+        }
 
         let url = `/api/projects/${this.currentProjectId}/translate/start`;
         if (chapterId) url += `?chapter_id=${chapterId}`;
+
+        // Immediate UI feedback
+        this.updateTranslatingStatus(true);
+        const chapTitle = this.currentChapter ? this.currentChapter.title : (chapterId || '');
+        this.appendLog('info', chapterId ? `[Khởi động] Đang chuẩn bị dịch chương: ${chapTitle}...` : 'Đang chuẩn bị dịch toàn bộ sách...');
+        this.statusText.textContent = 'Đang khởi động phiên dịch...';
+
+        // Trigger polling immediately
+        this.startStatusPolling(this.currentProjectId);
 
         try {
             const res = await fetch(url, { method: 'POST' });
             const data = await res.json();
             if (data.status === 'ok') {
-                this.updateTranslatingStatus(true);
-                this.appendLog('info', 'Đã bắt đầu tác vụ dịch...');
+                this.appendLog('success', data.message);
             } else {
                 this.appendLog('info', data.message);
             }
         } catch (e) {
             this.appendLog('error', `Lỗi bắt đầu dịch: ${e.message}`);
+            this.updateTranslatingStatus(false);
         }
     }
 

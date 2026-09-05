@@ -394,31 +394,10 @@ def export_book(project_id: str, export_format: str):
         raise HTTPException(status_code=400, detail=f"Định dạng xuất bản không hỗ trợ: {export_format}")
 
 
-@app.get("/api/stream/{project_id}")
-async def stream_events(project_id: str, request: Request):
-    """Server-Sent Events (SSE) stream for live translation updates."""
-    queue = worker_instance.subscribe(project_id)
-
-    async def event_generator():
-        try:
-            # Initial ping
-            yield f"event: ping\ndata: {json.dumps({'status': 'connected'})}\n\n"
-
-            while True:
-                if await request.is_disconnected():
-                    break
-
-                try:
-                    # Wait for next event with a 15s timeout for keep-alive pings
-                    msg = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield f"event: {msg['event']}\ndata: {json.dumps(msg['data'], ensure_ascii=False)}\n\n"
-                except asyncio.TimeoutError:
-                    yield f": keep-alive\n\n"
-
-        finally:
-            worker_instance.unsubscribe(project_id, queue)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+@app.get("/api/projects/{project_id}/status")
+def get_project_status(project_id: str, since: float = 0.0):
+    """Returns live translation progress, new logs, and updated paragraphs."""
+    return worker_instance.get_state(project_id, since)
 
 
 # Mount static web directory

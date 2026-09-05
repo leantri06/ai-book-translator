@@ -1,12 +1,11 @@
 """
-Asynchronous Translation Worker & Realtime Event Broadcaster.
-Handles background translation jobs, chunk-by-chunk auto-saving, pause/resume, and SSE streams.
+Asynchronous Translation Worker with Thread-Safe State & Buffer.
+Handles background translation jobs, chunk-by-chunk auto-saving, pause/resume, and real-time polling state.
 """
-import asyncio
 import threading
 import time
 import logging
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 from dataclasses import asdict
 
 from core.parser import BookProject, BookChapter, BookParagraph
@@ -19,37 +18,59 @@ logger = logging.getLogger("TranslatorWorker")
 
 
 class TranslationWorker:
-    """Manages active background translation jobs."""
+    """Manages active background translation jobs with thread-safe polling buffers."""
 
     def __init__(self):
-        self._active_jobs: Dict[str, dict] = {}  # {project_id: {"thread": Thread, "stop_event": Event, "status": "running"}}
-        self._subscribers: Dict[str, Set[asyncio.Queue]] = {}  # {project_id: set(queues)}
-        self._lock = threading.Lock()
+        self._active_jobs: Dict[str, dict] = {}
+        # Buffer of logs and paragraph updates for fast, reliable polling
+        self._project_states: Dict[str, dict] = {}
+        self._lock = threading.RLock()
 
-    def subscribe(self, project_id: str) -> asyncio.Queue:
+    def get_state(self, project_id: str, since_timestamp: float = 0.0) -> dict:
+        """Returns the current state and any new logs/paragraph updates since timestamp."""
         with self._lock:
-            if project_id not in self._subscribers:
-                self._subscribers[project_id] = set()
-            q = asyncio.Queue(maxsize=100)
-            self._subscribers[project_id].add(q)
-            return q
+            state = self._project_states.get(project_id)
+            is_running = bool(project_id in self._active_jobs and self._active_jobs[project_id]["status"] == "running")
 
-    def unsubscribe(self, project_id: str, q: asyncio.Queue) -> None:
+            if not state:
+                return {
+                    "is_running": is_running,
+                    "status_text": "Đang chạy..." if is_running else "Sẵn sàng",
+                    "chapter_id": "",
+                    "chapter_title": "",
+                    "chapter_progress": 0.0,
+                    "overall_progress": 0.0,
+                    "logs": [],
+                    "updated_paragraphs": [],
+                    "timestamp": time.time()
+                }
+
+            # Filter new logs
+            new_logs = [l for l in state.get("logs", []) if l.get("timestamp", 0) > since_timestamp]
+            new_paras = [p for p in state.get("updated_paragraphs", []) if p.get("timestamp", 0) > since_timestamp]
+
+            return {
+                "is_running": is_running,
+                "status_text": state.get("status_text", "Đang dịch..."),
+                "chapter_id": state.get("chapter_id", ""),
+                "chapter_title": state.get("chapter_title", ""),
+                "chapter_progress": state.get("chapter_progress", 0.0),
+                "overall_progress": state.get("overall_progress", 0.0),
+                "logs": new_logs,
+                "updated_paragraphs": new_paras,
+                "timestamp": time.time()
+            }
+
+    def add_log(self, project_id: str, level: str, text: str) -> None:
         with self._lock:
-            if project_id in self._subscribers:
-                self._subscribers[project_id].discard(q)
-
-    def broadcast(self, project_id: str, event_type: str, data: dict) -> None:
-        """Sends an event payload to all active SSE listener queues for this project."""
-        payload = {"event": event_type, "data": data, "timestamp": time.time()}
-        with self._lock:
-            queues = list(self._subscribers.get(project_id, []))
-
-        for q in queues:
-            try:
-                q.put_nowait(payload)
-            except Exception:
-                pass
+            if project_id not in self._project_states:
+                self._project_states[project_id] = {"logs": [], "updated_paragraphs": []}
+            state = self._project_states[project_id]
+            log_entry = {"level": level, "text": text, "timestamp": time.time()}
+            state.setdefault("logs", []).append(log_entry)
+            # Keep only last 100 logs
+            if len(state["logs"]) > 100:
+                state["logs"] = state["logs"][-100:]
 
     def is_running(self, project_id: str) -> bool:
         with self._lock:
@@ -62,7 +83,8 @@ class TranslationWorker:
             if job:
                 job["stop_event"].set()
                 job["status"] = "stopping"
-                self.broadcast(project_id, "status_change", {"status": "paused", "message": "Đang tạm dừng..."})
+                if project_id in self._project_states:
+                    self._project_states[project_id]["status_text"] = "Đang tạm dừng..."
 
     def start_translation(self, project_id: str, chapter_id: Optional[str] = None) -> bool:
         with self._lock:
@@ -80,12 +102,15 @@ class TranslationWorker:
                 "stop_event": stop_event,
                 "status": "running"
             }
+            if project_id not in self._project_states:
+                self._project_states[project_id] = {"logs": [], "updated_paragraphs": []}
+            self._project_states[project_id]["status_text"] = "Bắt đầu dịch..."
             thread.start()
             return True
 
     def _run_translation_loop(self, project_id: str, target_chapter_id: Optional[str], stop_event: threading.Event) -> None:
         """Background thread executing the translation work."""
-        self.broadcast(project_id, "status_change", {"status": "running", "message": "Bắt đầu dịch..."})
+        self.add_log(project_id, "info", "Khởi động phiên dịch...")
 
         try:
             # 1. Load settings & initialize AI Translator
@@ -93,7 +118,7 @@ class TranslationWorker:
             translator = AITranslator(
                 provider=settings.get("provider", "gemini"),
                 api_key=settings.get("api_key", ""),
-                model=settings.get("model", ""),
+                model=settings.get("model", "gemini-3.6-flash"),
                 base_url=settings.get("base_url", ""),
                 temperature=settings.get("temperature", 0.3)
             )
@@ -104,7 +129,7 @@ class TranslationWorker:
             # 3. Load Project
             project = ProjectManager.load_project(project_id, load_all_paragraphs=False)
             if not project:
-                self.broadcast(project_id, "error", {"message": f"Không tìm thấy dự án {project_id}"})
+                self.add_log(project_id, "error", f"Không tìm thấy dự án {project_id}")
                 return
 
             # Determine chapters to translate
@@ -120,20 +145,23 @@ class TranslationWorker:
                         chapters_to_process.append(c)
 
             if not chapters_to_process:
-                self.broadcast(project_id, "complete", {"message": "Tất cả các chương đã được dịch hoàn tất!"})
+                self.add_log(project_id, "success", "Tất cả các chương đã được dịch hoàn tất!")
                 return
 
-            chunker = ParagraphChunker(target_word_count=600, max_paragraphs=8)
+            chunker = ParagraphChunker(target_word_count=500, max_paragraphs=6)
 
             for chap in chapters_to_process:
                 if stop_event.is_set():
                     break
 
-                self.broadcast(project_id, "chapter_start", {
-                    "chapter_id": chap.id,
-                    "title": chap.title,
-                    "total_paras": chap.total_paragraphs
-                })
+                with self._lock:
+                    st = self._project_states.setdefault(project_id, {})
+                    st["chapter_id"] = chap.id
+                    st["chapter_title"] = chap.title
+                    st["chapter_progress"] = chap.progress_percent
+                    st["status_text"] = f"Đang dịch: {chap.title[:30]}..."
+
+                self.add_log(project_id, "info", f"Bắt đầu chương: {chap.title} ({chap.total_paragraphs} đoạn)")
 
                 chunks = chunker.create_chunks(chap, only_pending=True)
                 total_chunks = len(chunks)
@@ -142,38 +170,31 @@ class TranslationWorker:
                     if stop_event.is_set():
                         break
 
-                    self.broadcast(project_id, "log", {
-                        "level": "info",
-                        "text": f"[{chap.title[:25]}] Đang dịch đoạn {chunk_idx + 1}/{total_chunks} ({chunk.total_words} từ)..."
-                    })
+                    self.add_log(project_id, "info", f"[{chap.title[:20]}] Đang dịch đoạn {chunk_idx + 1}/{total_chunks} ({chunk.total_words} từ)...")
 
                     # Call AI Translation
                     try:
                         translated_map = translator.translate_chunk(chunk, glossary)
                     except Exception as e:
                         logger.error(f"Translation chunk error: {e}")
-                        self.broadcast(project_id, "log", {
-                            "level": "error",
-                            "text": f"Lỗi khi gọi AI: {str(e)}. Thử lại sau 3s..."
-                        })
-                        time.sleep(3)
+                        self.add_log(project_id, "error", f"Lỗi gọi AI: {str(e)}. Thử lại sau 2s...")
+                        time.sleep(2)
                         if stop_event.is_set():
                             break
                         try:
                             translated_map = translator.translate_chunk(chunk, glossary)
                         except Exception as e2:
-                            self.broadcast(project_id, "error", {
-                                "message": f"Không thể dịch đoạn {chunk_idx + 1}: {str(e2)}"
-                            })
+                            self.add_log(project_id, "error", f"Đoạn {chunk_idx + 1} gặp lỗi: {str(e2)}")
                             continue
 
                     # Update chapter paragraphs
+                    now_ts = time.time()
                     updated_paras = []
                     for p in chunk.paragraphs:
                         if p.id in translated_map and translated_map[p.id]:
                             p.translated_text = translated_map[p.id]
                             p.status = "done"
-                            updated_paras.append({"id": p.id, "text": p.translated_text, "status": "done"})
+                            updated_paras.append({"id": p.id, "text": p.translated_text, "chapter_id": chap.id, "timestamp": now_ts})
 
                     # Save chapter to disk immediately
                     ProjectManager.save_chapter(project_id, chap)
@@ -182,38 +203,36 @@ class TranslationWorker:
                     updated_proj = ProjectManager.load_project(project_id, load_all_paragraphs=False)
                     overall_progress = updated_proj.progress_percent if updated_proj else 0.0
 
-                    self.broadcast(project_id, "chunk_done", {
-                        "chapter_id": chap.id,
-                        "chunk_index": chunk_idx + 1,
-                        "total_chunks": total_chunks,
-                        "chapter_progress": chap.progress_percent,
-                        "overall_progress": overall_progress,
-                        "updated_paragraphs": updated_paras
-                    })
+                    with self._lock:
+                        st = self._project_states.setdefault(project_id, {})
+                        st["chapter_id"] = chap.id
+                        st["chapter_title"] = chap.title
+                        st["chapter_progress"] = chap.progress_percent
+                        st["overall_progress"] = overall_progress
+                        st["status_text"] = f"Đang dịch: {chap.title[:25]} ({chap.progress_percent}%)"
+                        # Keep recent updated paragraphs
+                        st.setdefault("updated_paragraphs", []).extend(updated_paras)
+                        if len(st["updated_paragraphs"]) > 200:
+                            st["updated_paragraphs"] = st["updated_paragraphs"][-200:]
 
-                    time.sleep(0.3)  # Gentle pacing
+                    time.sleep(0.2)
 
-                self.broadcast(project_id, "chapter_done", {
-                    "chapter_id": chap.id,
-                    "title": chap.title,
-                    "progress": chap.progress_percent
-                })
+                self.add_log(project_id, "success", f"Hoàn thành chương: {chap.title} ({chap.progress_percent}%)")
 
             if not stop_event.is_set():
-                self.broadcast(project_id, "complete", {
-                    "message": "Quá trình dịch đã hoàn tất thành công!"
-                })
+                self.add_log(project_id, "success", "Tất cả các chương yêu cầu đã được dịch xong!")
 
         except Exception as e:
             logger.exception("Fatal in translation loop")
-            self.broadcast(project_id, "error", {"message": f"Lỗi hệ thống: {str(e)}"})
+            self.add_log(project_id, "error", f"Lỗi hệ thống: {str(e)}")
 
         finally:
             with self._lock:
                 if project_id in self._active_jobs:
                     self._active_jobs[project_id]["status"] = "idle"
-            self.broadcast(project_id, "status_change", {"status": "idle", "message": "Đã dừng"})
+                if project_id in self._project_states:
+                    self._project_states[project_id]["status_text"] = "Sẵn sàng"
+            self.add_log(project_id, "info", "Đã kết thúc phiên dịch.")
 
 
-# Global worker instance
 worker_instance = TranslationWorker()
