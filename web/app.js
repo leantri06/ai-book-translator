@@ -533,7 +533,7 @@ class BookTranslatorApp {
     renderReaderView() {
         this.readerBody.innerHTML = '';
         if (!this.currentChapter || !this.currentChapter.paragraphs.length) {
-            this.readerBody.innerHTML = '<p>Không có nội dung để hiển thị.</p>';
+            this.readerBody.innerHTML = '<p style="text-align:center; color: var(--text-muted); margin-top: 40px;">Không có nội dung để hiển thị.</p>';
             return;
         }
 
@@ -541,15 +541,29 @@ class BookTranslatorApp {
         titleH2.textContent = this.currentChapter.title;
         this.readerBody.appendChild(titleH2);
 
+        const translatedCount = this.currentChapter.paragraphs.filter(p => p.translated_text && p.translated_text.trim()).length;
+        const isNotTranslated = translatedCount === 0;
+
+        if (isNotTranslated && this.readerDisplayMode !== 'en-only') {
+            const alertBox = document.createElement('div');
+            alertBox.style.cssText = 'background: rgba(234, 179, 8, 0.12); border: 1px solid rgba(234, 179, 8, 0.35); border-radius: 8px; padding: 18px 24px; margin-bottom: 30px; text-align: center; color: #fde047;';
+            alertBox.innerHTML = `
+                <div style="font-weight: 700; font-size: 15px; margin-bottom: 6px;">⚠️ Chương này chưa được dịch sang tiếng Việt!</div>
+                <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">Bạn đang chọn chế độ xem "Chỉ tiếng Việt", nhưng AI chưa dịch chương này. Hãy chọn các chương đã dịch (như PROLOGUE hoặc CHAPTER ONE ở cột bên trái) hoặc bấm nút dưới đây để AI dịch ngay chương này.</div>
+                <button class="btn btn-primary" onclick="app.startTranslation('${this.currentChapter.id}')" style="margin: 0 auto;">⚡ Dịch ngay chương này (${this.currentChapter.paragraphs.length} đoạn)</button>
+            `;
+            this.readerBody.appendChild(alertBox);
+        }
+
         for (const p of this.currentChapter.paragraphs) {
-            const trans = p.translated_text || p.original_text;
+            const hasVi = p.translated_text && p.translated_text.trim();
 
             if (this.readerDisplayMode === 'bilingual') {
                 const pair = document.createElement('div');
                 pair.className = 'reader-bilingual-pair';
                 pair.innerHTML = `
                     <div class="reader-bilingual-en">${this.escapeHtml(p.original_text)}</div>
-                    <div class="reader-bilingual-vi">${this.escapeHtml(trans)}</div>
+                    <div class="reader-bilingual-vi">${hasVi ? this.escapeHtml(p.translated_text) : '<em style="color: var(--text-dim); font-size: 0.9em;">[Đoạn này chưa dịch]</em>'}</div>
                 `;
                 this.readerBody.appendChild(pair);
             } else if (this.readerDisplayMode === 'en-only') {
@@ -559,7 +573,11 @@ class BookTranslatorApp {
             } else {
                 // vi-only
                 const pEl = document.createElement('p');
-                pEl.textContent = trans;
+                if (hasVi) {
+                    pEl.textContent = p.translated_text;
+                } else {
+                    pEl.innerHTML = `<em style="color: var(--text-dim); font-size: 0.95em;">[Chưa dịch: "${this.escapeHtml(p.original_text.substring(0, 80))}..."]</em>`;
+                }
                 this.readerBody.appendChild(pEl);
             }
         }
