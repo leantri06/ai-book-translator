@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import asyncio
 import json
+import requests
 from typing import Optional, List
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
@@ -127,8 +128,8 @@ def check_quota(data: CheckQuotaModel):
                         res["models"].append({"model": m, "status": "invalid", "text": f"Key không hợp lệ ({r.status_code})"})
                     else:
                         res["models"].append({"model": m, "status": "other", "text": f"Mã lỗi {r.status_code}"})
-                except Exception:
-                    res["models"].append({"model": m, "status": "error", "text": "Lỗi kết nối"})
+                except Exception as ex:
+                    res["models"].append({"model": m, "status": "error", "text": f"Lỗi: {str(ex)}"})
 
             if all_invalid:
                 res["status"] = "error"
