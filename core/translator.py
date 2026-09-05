@@ -41,15 +41,24 @@ class RateLimitError(RuntimeError):
         self.retry_after = retry_after
 
 
+class DailyQuotaError(RuntimeError):
+    """Raised when an API key has reached its 24-hour daily quota limit."""
+    pass
+
+
 class AITranslator:
     """Dispatches translation requests to the chosen provider."""
 
     def __init__(self, provider: str = "gemini", api_key: str = "", model: str = "",
                  base_url: str = "", temperature: float = 0.3):
         self.provider = provider.lower()
-        self.api_key = api_key.strip()
         self.base_url = base_url.strip()
         self.temperature = temperature
+
+        # Multi-key support: parse comma, semicolon, or newline separated keys
+        raw_keys = api_key.replace('\r', '\n').replace(';', ',').replace('\n', ',')
+        self.api_keys = [k.strip() for k in raw_keys.split(',') if k.strip()]
+        self.api_key = self.api_keys[0] if self.api_keys else ""
 
         # Default model selection & intelligent model aliasing
         if self.provider == "gemini":
@@ -66,7 +75,7 @@ class AITranslator:
         else:
             self.model = model or "free-fallback"
 
-    def translate_chunk(self, chunk: TranslationChunk, glossary: Optional[BookGlossary] = None) -> Dict[str, str]:
+    def translate_chunk(self, chunk: TranslationChunk, glossary: Optional[BookGlossary] = None, api_key: Optional[str] = None) -> Dict[str, str]:
         """Translates a structured chunk and returns {para_id: translated_text}."""
         glossary_context = glossary.build_prompt_context() if glossary else ""
 
@@ -82,19 +91,23 @@ class AITranslator:
             f"{chunk.format_input_prompt()}"
         )
 
+        active_key = (api_key or self.api_key).strip()
+
         if self.provider == "gemini":
-            return self._translate_gemini(user_content, chunk)
+            return self._translate_gemini(user_content, chunk, active_key=active_key)
         elif self.provider in ("openai", "deepseek", "openai_compatible", "openrouter", "ollama"):
-            return self._translate_openai_compatible(user_content, chunk)
+            return self._translate_openai_compatible(user_content, chunk, active_key=active_key)
         else:
             return self._translate_free_fallback(chunk)
 
-    def _translate_gemini(self, prompt: str, chunk: TranslationChunk) -> Dict[str, str]:
+    def _translate_gemini(self, prompt: str, chunk: TranslationChunk, active_key: Optional[str] = None) -> Dict[str, str]:
         """Calls Google Gemini API directly or via google-genai with auto-fallback between models."""
         import re
 
+        key_to_use = (active_key or self.api_key).strip()
+
         # Fallback to direct REST API if no key is provided or for simplicity
-        if not self.api_key:
+        if not key_to_use:
             # If no API key, fall back to free translator
             return self._translate_free_fallback(chunk)
 
@@ -108,7 +121,7 @@ class AITranslator:
         last_wait_sec = 35.0
 
         for model_name in candidate_models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self.api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key_to_use}"
             headers = {"Content-Type": "application/json"}
             payload = {
                 "contents": [
@@ -156,6 +169,10 @@ class AITranslator:
 
             # Detect rate limits (429 or quota limits)
             if resp.status_code == 429 or "quota" in err_msg.lower():
+                if "generaterequestsperday" in err_msg.lower() or "per_day" in err_msg.lower() or "perday" in err_msg.lower():
+                    last_err = DailyQuotaError(f"Hết hạn mức ngày (Daily Quota) của model {model_name}: {err_msg}")
+                    continue
+
                 wait_sec = 35.0
                 match = re.search(r'retry in ([0-9.]+)\s*s', err_msg, re.IGNORECASE)
                 if match:
@@ -172,31 +189,22 @@ class AITranslator:
 
             last_err = RuntimeError(f"Lỗi Gemini API ({resp.status_code}): {err_msg}")
 
-        if isinstance(last_err, RateLimitError):
+        if isinstance(last_err, (RateLimitError, DailyQuotaError)):
             raise last_err
         if last_err:
             raise last_err
         raise RuntimeError("Không thể nhận phản hồi từ Gemini API.")
 
-        data = resp.json()
-        text_output = ""
-        candidates = data.get("candidates", [])
-        if candidates:
-            parts = candidates[0].get("content", {}).get("parts", [])
-            for p in parts:
-                text_output += p.get("text", "")
-
-        from core.chunker import ParagraphChunker
-        return ParagraphChunker.parse_chunk_response(text_output, chunk)
-
-    def _translate_openai_compatible(self, prompt: str, chunk: TranslationChunk) -> Dict[str, str]:
+    def _translate_openai_compatible(self, prompt: str, chunk: TranslationChunk, active_key: Optional[str] = None) -> Dict[str, str]:
         """Calls any OpenAI-compatible API (DeepSeek, OpenRouter, OpenAI, Local Ollama)."""
         base_url = self.base_url.rstrip("/") if self.base_url else "https://api.deepseek.com/v1"
         url = f"{base_url}/chat/completions"
 
+        key_to_use = (active_key or self.api_key).strip()
+
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}" if self.api_key else "Bearer none"
+            "Authorization": f"Bearer {key_to_use}" if key_to_use else "Bearer none"
         }
 
         payload = {

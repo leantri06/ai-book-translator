@@ -204,6 +204,9 @@ class BookTranslatorApp {
         this.settingsTemp.addEventListener('input', (e) => {
             this.tempValueDisplay.textContent = e.target.value;
         });
+        if (this.settingsApiKey) {
+            this.settingsApiKey.addEventListener('input', () => this.updateApiKeyCounter());
+        }
         this.btnSaveSettings.addEventListener('click', () => this.saveSettings());
 
         // File Upload Dropzone
@@ -880,7 +883,8 @@ class BookTranslatorApp {
 
             this.settingsProvider.value = data.provider || 'gemini';
             this.settingsApiKey.value = data.api_key || '';
-            const currentModel = data.model || 'gemini-2.5-flash';
+            this.updateApiKeyCounter();
+            const currentModel = data.model || 'gemini-3.5-flash';
             this.settingsModel.value = currentModel;
             this.settingsBaseUrl.value = data.base_url || '';
             this.settingsTemp.value = data.temperature || 0.3;
@@ -986,6 +990,37 @@ class BookTranslatorApp {
         }
     }
 
+    updateApiKeyCounter() {
+        if (!this.settingsApiKey) return;
+        const raw = this.settingsApiKey.value || '';
+        const keys = raw.split(/[\n,;]+/).map(k => k.trim()).filter(k => k.length > 0);
+        const badge = document.getElementById('keyCountBadge');
+        const notice = document.getElementById('multiKeyNotice');
+        const countSpan = document.getElementById('multiKeyCount');
+        const multSpan = document.getElementById('multiKeyMultiplier');
+
+        if (keys.length > 1) {
+            if (badge) {
+                badge.style.display = 'inline-block';
+                badge.textContent = `🚀 ${keys.length} Keys (Song song)`;
+            }
+            if (notice) {
+                notice.style.display = 'block';
+                if (countSpan) countSpan.textContent = keys.length;
+                if (multSpan) multSpan.textContent = keys.length;
+            }
+        } else if (keys.length === 1) {
+            if (badge) {
+                badge.style.display = 'inline-block';
+                badge.textContent = `1 Key (1 luồng)`;
+            }
+            if (notice) notice.style.display = 'none';
+        } else {
+            if (badge) badge.style.display = 'none';
+            if (notice) notice.style.display = 'none';
+        }
+    }
+
     async saveSettings() {
         const payload = {
             provider: this.settingsProvider.value,
@@ -1010,6 +1045,7 @@ class BookTranslatorApp {
     }
 
     openSettingsModal() {
+        this.updateApiKeyCounter();
         this.showModal(this.settingsModal);
     }
 
