@@ -24,6 +24,7 @@ class BookParagraph:
     index: int = 0
     css_class: str = ""
     notes: str = ""
+    image_path: str = ""
 
 
 @dataclass
@@ -327,10 +328,28 @@ class BookParser:
                         title = l
                     break
 
+        # Setup project images directory
+        data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+        img_dir = os.path.join(data_dir, "projects", project_id, "images")
+        os.makedirs(img_dir, exist_ok=True)
+
         for page_num, page in enumerate(reader.pages):
+            # Extract any embedded images on this page
+            page_images: List[str] = []
+            try:
+                if hasattr(page, "images"):
+                    for img_idx, img in enumerate(page.images):
+                        img_filename = f"p{page_num + 1}_{img_idx + 1}_{img.name}"
+                        img_path = os.path.join(img_dir, img_filename)
+                        with open(img_path, "wb") as f_img:
+                            f_img.write(img.data)
+                        page_images.append(img_path)
+            except Exception:
+                pass
+
             page_raw = page.extract_text() or ""
             raw_lines = [l.strip() for l in page_raw.splitlines() if l.strip()]
-            if not raw_lines:
+            if not raw_lines and not page_images:
                 continue
 
             # Filter standalone page number footer at bottom of page
@@ -361,6 +380,22 @@ class BookParser:
                 is_caption = bool(re.match(r'^(?:Figure|Table)\s+\d+[:\.]', line, re.I))
                 is_ref_item = bool(re.match(r'^\[\d+\]\s+[A-Z]', line))
 
+                # If Figure caption encountered and we have images on this page, insert image paragraph(s) before caption
+                if is_caption and "figure" in line.lower() and page_images:
+                    flush_para()
+                    for img_p in page_images:
+                        p_global_idx += 1
+                        current_paras.append(BookParagraph(
+                            id=f"c{chap_idx}_img{p_global_idx}",
+                            original_text=f"[Minh họa: {line[:100]}]",
+                            translated_text=f"[Minh họa: {line[:100]}]",
+                            status="done",
+                            tag="img",
+                            index=p_global_idx,
+                            image_path=img_p
+                        ))
+                    page_images = []
+
                 if is_bullet or is_caption or is_ref_item:
                     flush_para()
                     current_lines.append(line)
@@ -384,6 +419,22 @@ class BookParser:
 
                 if ends_sentence and (is_short_line or next_starts_new_block):
                     flush_para()
+
+            # If any remaining images on this page were not associated with a figure caption
+            if page_images:
+                flush_para()
+                for img_p in page_images:
+                    p_global_idx += 1
+                    current_paras.append(BookParagraph(
+                        id=f"c{chap_idx}_img{p_global_idx}",
+                        original_text=f"[Minh họa trang {page_num + 1}]",
+                        translated_text=f"[Minh họa trang {page_num + 1}]",
+                        status="done",
+                        tag="img",
+                        index=p_global_idx,
+                        image_path=img_p
+                    ))
+                page_images = []
 
         flush_chapter("End")
 

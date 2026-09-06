@@ -39,6 +39,8 @@ class ParagraphChunker:
         for p in chapter.paragraphs:
             if only_pending and p.status in ("done", "edited"):
                 continue
+            if p.tag == "img":
+                continue
             paras_to_translate.append(p)
 
         if not paras_to_translate:

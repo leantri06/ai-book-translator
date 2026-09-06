@@ -153,6 +153,22 @@ class BookExporter:
 
             html_parts = [f"<h2>{chap.title}</h2>"]
             for p in chap.paragraphs:
+                if (p.tag == "img" or getattr(p, "image_path", "")) and p.image_path and os.path.exists(p.image_path):
+                    img_filename = f"img_{os.path.basename(p.image_path)}"
+                    try:
+                        with open(p.image_path, "rb") as f_img:
+                            epub_img = epub.EpubItem(
+                                uid=f"img_{i}_{p.id}",
+                                file_name=f"images/{img_filename}",
+                                media_type="image/png" if p.image_path.lower().endswith(".png") else "image/jpeg",
+                                content=f_img.read()
+                            )
+                            book.add_item(epub_img)
+                            html_parts.append(f'<div style="text-align: center; margin: 18px 0;"><img src="images/{img_filename}" style="max-width: 100%; height: auto;" /></div>')
+                    except Exception:
+                        pass
+                    continue
+
                 trans = p.translated_text.strip() if p.translated_text.strip() else p.original_text
                 if bilingual:
                     html_parts.append(f'<div class="bilingual-en">{p.original_text}</div>')
@@ -207,6 +223,18 @@ class BookExporter:
             heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
             for p in chap.paragraphs:
+                # Handle image paragraph
+                if (p.tag == "img" or getattr(p, "image_path", "")) and p.image_path and os.path.exists(p.image_path):
+                    try:
+                        p_img = doc.add_paragraph()
+                        p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        p_img.paragraph_format.space_before = Pt(14)
+                        p_img.paragraph_format.space_after = Pt(6)
+                        p_img.add_run().add_picture(p.image_path, width=Inches(5.5))
+                    except Exception:
+                        pass
+                    continue
+
                 trans = p.translated_text.strip() if p.translated_text.strip() else p.original_text
                 if bilingual:
                     # English original
@@ -236,12 +264,27 @@ class BookExporter:
     @classmethod
     def export_html(cls, project: BookProject, output_path: str, bilingual: bool = False) -> str:
         """Exports as a standalone, printable, elegant HTML reader (can be printed to PDF directly)."""
+        import base64
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
         chapters_html = []
         for chap in project.chapters:
             chap_body = []
             for p in chap.paragraphs:
+                # Handle image paragraph (embed base64 so HTML is 100% standalone and printable to PDF)
+                if (p.tag == "img" or getattr(p, "image_path", "")) and p.image_path and os.path.exists(p.image_path):
+                    try:
+                        with open(p.image_path, "rb") as f_img:
+                            b64 = base64.b64encode(f_img.read()).decode("utf-8")
+                        mime = "image/png" if p.image_path.lower().endswith(".png") else "image/jpeg"
+                        chap_body.append(f'''
+                        <div class="figure-wrapper" style="text-align: center; margin: 24px auto;">
+                            <img src="data:{mime};base64,{b64}" style="max-width: 95%; height: auto; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.12);" />
+                        </div>''')
+                    except Exception:
+                        pass
+                    continue
+
                 trans = p.translated_text.strip() if p.translated_text.strip() else p.original_text
                 if bilingual:
                     chap_body.append(f'''

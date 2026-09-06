@@ -281,11 +281,21 @@ def get_chapter(project_id: str, chapter_id: str):
                 "translated_text": p.translated_text,
                 "status": p.status,
                 "tag": p.tag,
-                "index": p.index
+                "index": p.index,
+                "image_path": getattr(p, "image_path", "")
             }
             for p in chapter.paragraphs
         ]
     }
+
+
+@app.get("/api/projects/{project_id}/images/{image_name}")
+def get_project_image(project_id: str, image_name: str):
+    from fastapi.responses import FileResponse
+    img_path = os.path.join(PROJECTS_DIR, project_id, "images", image_name)
+    if not os.path.exists(img_path):
+        raise HTTPException(status_code=404, detail="Không tìm thấy hình ảnh")
+    return FileResponse(img_path)
 
 
 @app.put("/api/projects/{project_id}/chapters/{chapter_id}/paragraphs/{para_id}")

@@ -75,6 +75,7 @@
 - **Tự động bóc tách mục lục chuẩn Paper**: Nhận diện thông minh các đề mục học thuật như `Abstract`, `1 Introduction`, `2 Background`, `3 Model Architecture`, `4 Why Self-Attention`, `5 Training`, `6 Results`, `7 Conclusion`, `References`... thành từng chương riêng biệt.
 - **Tái tạo đoạn văn thông minh (Smart Paragraph Reconstruction)**: Tự động ghép nối các từ bị gãy dấu gạch nối cuối dòng (`transduc-\n tion` ➔ `transduction`), phát hiện chuẩn xác ranh giới đoạn văn theo cấu trúc căn lề, chấm dứt hoàn toàn tình trạng dính chữ dính đoạn.
 - **Bảo toàn công thức toán học & Ký hiệu kỹ thuật**: Chế độ Prompt Học thuật chuyên sâu (`ACADEMIC_SYSTEM_PROMPT`) bảo toàn 100% công thức LaTeX, biến số ($Q, K, V, d_k, d_{model}, \text{FFN}(x)$), mã trích dẫn `[1]`, `[2]` và định danh `Figure`, `Table`.
+- **Trích xuất ảnh & Nhúng sơ đồ vào file xuất bản (Word, HTML, PDF)**: Tự động trích xuất toàn bộ hình ảnh, biểu đồ từ file PDF (Figure 1, Figure 2...) và nhúng sắc nét vào file Word (.docx), file HTML Reader (hỗ trợ in ra PDF giữ trọn vẹn cả chữ lẫn hình), cũng như hiển thị trực quan ngay trên giao diện đọc sách Dual Studio.
 - **Chuẩn hóa thuật ngữ AI / Khoa học máy tính**: Dịch nghĩa mượt mà kết hợp giữ thuật ngữ tiếng Anh trong ngoặc đơn (hoặc giữ nguyên các thuật ngữ quốc tế phổ biến như *Self-Attention*, *Transformer*, *Residual Connection*, *Softmax*, *Dropout*, *BLEU score*).
 
 ---

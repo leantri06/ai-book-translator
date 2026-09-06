@@ -497,6 +497,24 @@ class BookTranslatorApp {
             row.className = 'para-row';
             row.id = `para_${p.id}`;
 
+            // Image paragraph
+            if (p.tag === 'img' || p.image_path) {
+                const imgFilename = p.image_path ? p.image_path.split(/[\\/]/).pop() : '';
+                const imgSrc = imgFilename ? `/api/projects/${this.currentProjectId}/images/${imgFilename}` : '';
+                row.className = 'para-row para-row-image';
+                row.innerHTML = `
+                    <div class="para-en" style="text-align: center; padding: 14px;">
+                        ${imgSrc ? `<img src="${imgSrc}" alt="${this.escapeHtml(p.original_text)}" style="max-width: 90%; max-height: 420px; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.35);" />` : ''}
+                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px; font-weight: 500;">${this.escapeHtml(p.original_text)}</div>
+                    </div>
+                    <div class="para-vi-wrapper" style="display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.02);">
+                        <div style="color: var(--text-muted); font-size: 13px; font-style: italic;">[Hình ảnh / Sơ đồ được giữ nguyên bản gốc]</div>
+                    </div>
+                `;
+                frag.appendChild(row);
+                continue;
+            }
+
             let chipClass = 'chip-pending';
             let chipText = 'Đang chờ';
             if (p.status === 'done') {
@@ -576,6 +594,23 @@ class BookTranslatorApp {
         }
 
         for (const p of this.currentChapter.paragraphs) {
+            // Image in Reader View
+            if (p.tag === 'img' || p.image_path) {
+                const imgFilename = p.image_path ? p.image_path.split(/[\\/]/).pop() : '';
+                const imgSrc = imgFilename ? `/api/projects/${this.currentProjectId}/images/${imgFilename}` : '';
+                if (imgSrc) {
+                    const fig = document.createElement('div');
+                    fig.className = 'reader-figure';
+                    fig.style.cssText = 'text-align: center; margin: 28px auto; max-width: 95%;';
+                    fig.innerHTML = `
+                        <img src="${imgSrc}" alt="${this.escapeHtml(p.original_text)}" style="max-width: 100%; max-height: 520px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); display: inline-block;" />
+                        <div style="font-size: 13px; color: var(--text-muted); margin-top: 8px; font-style: italic;">${this.escapeHtml(p.original_text)}</div>
+                    `;
+                    this.readerBody.appendChild(fig);
+                }
+                continue;
+            }
+
             const hasVi = p.translated_text && p.translated_text.trim();
 
             if (this.readerDisplayMode === 'bilingual') {
