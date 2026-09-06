@@ -248,74 +248,144 @@ class BookParser:
     def parse_pdf(file_path: str, project_id: str) -> BookProject:
         reader = pypdf.PdfReader(file_path)
         meta = reader.metadata
-        title = meta.title if (meta and meta.title) else os.path.splitext(os.path.basename(file_path))[0]
-        author = meta.author if (meta and meta.author) else "Tác giả không rõ"
+        raw_name = os.path.splitext(os.path.basename(file_path))[0]
+        # Clean hash/project_id prefix like "76f1b7f2_Transformer"
+        clean_name = re.sub(r'^[0-9a-f]{8}_', '', raw_name)
+        title = meta.title if (meta and meta.title and meta.title.strip()) else clean_name
+        author = meta.author if (meta and meta.author and meta.author.strip()) else "Tác giả không rõ"
+
+        MAJOR_HEADING_PATTERN = re.compile(
+            r'^(?:'
+            r'(\d{1,2}\.?\s+[A-Z][\w\s\-/,\(\)]{2,})'
+            r'|'
+            r'(Abstract|Conclusion|Conclusions|References|Bibliography|Acknowledgements|Appendix(?:\s+[A-Z0-9]+)?)'
+            r'|'
+            r'((?:Chapter|Chương|Part|Phần|Section|Hồi|Mục)\s+([0-9ivxlc]+|[a-z]+)[:\s\.\-]*(.*))'
+            r')$',
+            re.IGNORECASE
+        )
+
+        SUB_HEADING_PATTERN = re.compile(
+            r'^(?:\d+\.)+\d+\s+([A-Z][\w\s\-/,\(\)]{2,})$'
+        )
 
         chapters: List[BookChapter] = []
         p_global_idx = 0
         chap_idx = 0
 
-        # Group pages into chapters: Look for "Chapter X" or group every ~10-15 pages
         current_paras: List[BookParagraph] = []
-        current_title = f"Phần mở đầu / Chương 1"
+        current_title = "Phần mở đầu / Tiêu đề"
+        current_lines: List[str] = []
 
-        chapter_header_pattern = re.compile(
-            r'^(?:chapter|part|section|chương|hồi|mục)\s+([0-9ivxlc]+|[a-z]+)[:\s\.\-]*(.*)$',
-            re.IGNORECASE
-        )
-
-        for page_num, page in enumerate(reader.pages):
-            page_text = page.extract_text() or ""
-            if not page_text.strip():
-                continue
-
-            # Clean hyphenation (e.g. 'un- \n believable' -> 'unbelievable')
-            cleaned_text = re.sub(r'(\w+)-\s*\n\s*(\w+)', r'\1\2', page_text)
-
-            # Split paragraphs by double newline or significant line breaks
-            raw_blocks = re.split(r'\n\s*\n', cleaned_text)
-
-            for block in raw_blocks:
-                # Merge internal single linebreaks within a paragraph
-                lines = [l.strip() for l in block.splitlines() if l.strip()]
-                if not lines:
+        def flush_para(tag: str = "p"):
+            nonlocal current_lines, current_paras, p_global_idx
+            if not current_lines:
+                return
+            text = ""
+            for l in current_lines:
+                l = l.strip()
+                if not l:
                     continue
-                para_text = " ".join(lines)
-                if len(para_text) < 3:
-                    continue
-
-                # Check if this paragraph is a chapter heading
-                match = chapter_header_pattern.match(para_text)
-                if match and len(para_text) < 120 and current_paras:
-                    # Flush previous chapter
-                    chapters.append(BookChapter(
-                        id=f"chap_{chap_idx}",
-                        title=current_title,
-                        paragraphs=current_paras,
-                        doc_name=f"Page_{page_num}",
-                        order=chap_idx
-                    ))
-                    chap_idx += 1
-                    current_paras = []
-                    current_title = para_text
-
+                if text.endswith("-"):
+                    text = text[:-1] + l
+                else:
+                    text = (text + " " + l).strip() if text else l
+            current_lines = []
+            if len(text) >= 2:
                 p_global_idx += 1
-                tag = "h2" if match or (len(para_text) < 60 and para_text.isupper()) else "p"
                 current_paras.append(BookParagraph(
                     id=f"c{chap_idx}_p{p_global_idx}",
-                    original_text=para_text,
+                    original_text=text,
                     tag=tag,
                     index=p_global_idx
                 ))
 
-        if current_paras:
-            chapters.append(BookChapter(
-                id=f"chap_{chap_idx}",
-                title=current_title,
-                paragraphs=current_paras,
-                doc_name="End",
-                order=chap_idx
-            ))
+        def flush_chapter(next_title: str):
+            nonlocal current_paras, chapters, current_title, chap_idx
+            flush_para()
+            if current_paras:
+                chapters.append(BookChapter(
+                    id=f"chap_{chap_idx}",
+                    title=current_title,
+                    paragraphs=current_paras,
+                    doc_name=f"Section_{chap_idx}",
+                    order=chap_idx
+                ))
+                chap_idx += 1
+                current_paras = []
+            current_title = next_title
+
+        # Check if first page contains paper title (e.g. line in title case before abstract)
+        if reader.pages:
+            first_page_text = reader.pages[0].extract_text() or ""
+            f_lines = [l.strip() for l in first_page_text.splitlines() if l.strip()]
+            for l in f_lines[:8]:
+                if "attribution" in l.lower() or "permission" in l.lower() or "arxiv" in l.lower():
+                    continue
+                if 10 < len(l) < 80 and not l.endswith(('.', ':', ';', '@')):
+                    if title == clean_name or title == "Tác giả không rõ":
+                        title = l
+                    break
+
+        for page_num, page in enumerate(reader.pages):
+            page_raw = page.extract_text() or ""
+            raw_lines = [l.strip() for l in page_raw.splitlines() if l.strip()]
+            if not raw_lines:
+                continue
+
+            # Filter standalone page number footer at bottom of page
+            if raw_lines and re.match(r'^\d+$', raw_lines[-1]):
+                raw_lines.pop()
+
+            # Compute typical line length for justified paragraphs on this page
+            long_lines = [len(l) for l in raw_lines if len(l) > 30 and not l.endswith(('.', ':', ';'))]
+            avg_line_len = (sum(long_lines) / len(long_lines)) if long_lines else 80
+
+            for l_idx, line in enumerate(raw_lines):
+                # Check major heading (Starts a new Chapter/Section in TOC)
+                m_major = MAJOR_HEADING_PATTERN.match(line)
+                if m_major and len(line) < 75 and not line.endswith(('.', ',', ';')):
+                    flush_chapter(line)
+                    continue
+
+                # Check sub heading (e.g. 3.1, 3.2.1)
+                m_sub = SUB_HEADING_PATTERN.match(line)
+                if m_sub and len(line) < 75 and not line.endswith(('.', ',', ';')):
+                    flush_para()
+                    current_lines.append(line)
+                    flush_para(tag="h3")
+                    continue
+
+                # Check special items (bullets, figures, tables, reference items [1])
+                is_bullet = line.startswith(('•', '–', '- ', '* '))
+                is_caption = bool(re.match(r'^(?:Figure|Table)\s+\d+[:\.]', line, re.I))
+                is_ref_item = bool(re.match(r'^\[\d+\]\s+[A-Z]', line))
+
+                if is_bullet or is_caption or is_ref_item:
+                    flush_para()
+                    current_lines.append(line)
+                    continue
+
+                current_lines.append(line)
+
+                # End of paragraph detection:
+                ends_sentence = line.endswith(('.', '!', '?', ':', '."'))
+                is_short_line = len(line) < (avg_line_len * 0.78)
+
+                next_starts_new_block = False
+                if l_idx + 1 < len(raw_lines):
+                    next_l = raw_lines[l_idx + 1]
+                    if (MAJOR_HEADING_PATTERN.match(next_l) or 
+                        SUB_HEADING_PATTERN.match(next_l) or 
+                        next_l.startswith(('•', '–', '- ', '* ')) or 
+                        re.match(r'^(?:Figure|Table)\s+\d+[:\.]', next_l, re.I) or
+                        re.match(r'^\[\d+\]\s+[A-Z]', next_l)):
+                        next_starts_new_block = True
+
+                if ends_sentence and (is_short_line or next_starts_new_block):
+                    flush_para()
+
+        flush_chapter("End")
 
         return BookProject(
             id=project_id,

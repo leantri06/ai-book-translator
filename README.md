@@ -1,8 +1,8 @@
-# 📚 AI Book Translator Pro (V3.0)
+# 📚 AI Book & Research Paper Translator Pro (V3.1)
 
 <p align="center">
-  <strong>Phần mềm dịch sách tiếng Anh sang tiếng Việt chuyên sâu với chất lượng xuất bản cao cấp</strong><br>
-  <em>Hỗ trợ chạy song song đa luồng nhiều API Key, tự động cứu hộ kiểm duyệt, giữ ảnh minh họa, định nghĩa nhân vật & xưng hô đồng nhất.</em>
+  <strong>Phần mềm dịch sách & bài báo khoa học tiếng Anh sang tiếng Việt chuyên sâu với chất lượng xuất bản cao cấp</strong><br>
+  <em>Hỗ trợ chạy song song đa luồng nhiều API Key, tự động bóc tách mục lục học thuật, bảo toàn công thức toán học, giữ ảnh minh họa, định nghĩa nhân vật & xưng hô đồng nhất.</em>
 </p>
 
 <p align="center">
@@ -70,6 +70,12 @@
   - 📗 **EPUB Song Ngữ**: Tuyệt vời để học tiếng Anh qua sách.
   - 📄 **Word (.DOCX)**: Đầy đủ mục lục, căn lề chuẩn in ấn.
   - 🌐 **HTML Reader / In PDF**: Trực quan, hỗ trợ bấm `Ctrl + P` lưu file PDF chuẩn sách in.
+
+### 9. 🔬 Chuyên Sâu Dịch Bài Báo Khoa Học & Nghiên Cứu (Academic / AI Papers)
+- **Tự động bóc tách mục lục chuẩn Paper**: Nhận diện thông minh các đề mục học thuật như `Abstract`, `1 Introduction`, `2 Background`, `3 Model Architecture`, `4 Why Self-Attention`, `5 Training`, `6 Results`, `7 Conclusion`, `References`... thành từng chương riêng biệt.
+- **Tái tạo đoạn văn thông minh (Smart Paragraph Reconstruction)**: Tự động ghép nối các từ bị gãy dấu gạch nối cuối dòng (`transduc-\n tion` ➔ `transduction`), phát hiện chuẩn xác ranh giới đoạn văn theo cấu trúc căn lề, chấm dứt hoàn toàn tình trạng dính chữ dính đoạn.
+- **Bảo toàn công thức toán học & Ký hiệu kỹ thuật**: Chế độ Prompt Học thuật chuyên sâu (`ACADEMIC_SYSTEM_PROMPT`) bảo toàn 100% công thức LaTeX, biến số ($Q, K, V, d_k, d_{model}, \text{FFN}(x)$), mã trích dẫn `[1]`, `[2]` và định danh `Figure`, `Table`.
+- **Chuẩn hóa thuật ngữ AI / Khoa học máy tính**: Dịch nghĩa mượt mà kết hợp giữ thuật ngữ tiếng Anh trong ngoặc đơn (hoặc giữ nguyên các thuật ngữ quốc tế phổ biến như *Self-Attention*, *Transformer*, *Residual Connection*, *Softmax*, *Dropout*, *BLEU score*).
 
 ---
 
