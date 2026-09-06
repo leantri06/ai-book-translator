@@ -1,13 +1,12 @@
 @echo off
-title AI Book & Paper Translator Pro
+title AI Book and Paper Translator Pro
 color 0B
-chcp 65001 > nul
 echo =======================================================
-echo          AI BOOK & PAPER TRANSLATOR PRO
-echo    Phần mềm dịch sách & bài báo khoa học chuyên nghiệp
+echo          AI BOOK AND PAPER TRANSLATOR PRO
+echo    Phan mem dich sach va bai bao khoa hoc chuyen nghiep
 echo =======================================================
 echo.
-echo Đang kiểm tra môi trường và khởi động máy chủ...
+echo Dang khoi dong may chu va mo trinh duyet...
 echo.
 
 cd /d "%~dp0"
@@ -15,8 +14,8 @@ python main.py
 
 if errorlevel 1 (
     echo.
-    echo [LỖI] Không thể khởi chạy ứng dụng!
-    echo Vui lòng kiểm tra Python và các thư viện cần thiết.
+    echo [LOI] Khong the khoi chay ung dung!
+    echo Vui long kiem tra Python va cac thu vien can thiet.
     echo.
 )
 pause
