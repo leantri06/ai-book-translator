@@ -86,9 +86,8 @@ def main():
     host = "127.0.0.1"
     default_port = 8000
 
-    print("\n-------------------------------------------------------")
-    print("   AI BOOK TRANSLATOR PRO - V2.0")
-    print("   Phan mem dich sach Anh - Viet chuyen nghiep")
+    print("   AI BOOK & RESEARCH PAPER TRANSLATOR PRO - V3.5")
+    print("   Phan mem dich sach & bai bao khoa hoc chuyen nghiep")
     print("-------------------------------------------------------")
 
     # Check if our server is already running on port 8000
