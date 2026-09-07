@@ -11,6 +11,10 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 import ebooklib
 from ebooklib import epub
 import pypdf
+try:
+    import pymupdf
+except ImportError:
+    pymupdf = None
 import docx
 
 
@@ -247,10 +251,372 @@ class BookParser:
 
     @staticmethod
     def parse_pdf(file_path: str, project_id: str) -> BookProject:
+        """Parses PDF into structured chapters, extracting high-res figures and tables."""
+        if pymupdf is not None:
+            try:
+                return BookParser._parse_pdf_mupdf(file_path, project_id)
+            except Exception as e:
+                import traceback
+                print(f"[PDF Parser] PyMuPDF parsing failed: {e}. Falling back to pypdf.")
+        return BookParser._parse_pdf_pypdf(file_path, project_id)
+
+    @staticmethod
+    def _parse_pdf_mupdf(file_path: str, project_id: str) -> BookProject:
+        doc = pymupdf.open(file_path)
+        raw_name = os.path.splitext(os.path.basename(file_path))[0]
+        clean_name = re.sub(r'^[0-9a-f]{8}_', '', raw_name)
+        meta = doc.metadata or {}
+        title = meta.get("title", "").strip() if meta.get("title") else clean_name
+        author = meta.get("author", "").strip() if meta.get("author") else "Tác giả không rõ"
+
+        if len(doc) > 0:
+            p0_text = doc[0].get_text() or ""
+            f_lines = [l.strip() for l in p0_text.splitlines() if l.strip()]
+            for l in f_lines[:8]:
+                if any(w in l.lower() for w in ("arxiv", "permission", "attribution", "doi", "issn", "ieee")):
+                    continue
+                if 10 < len(l) < 90 and not l.endswith(('.', ':', ';', '@')):
+                    if title == clean_name or title == "Tác giả không rõ":
+                        title = l
+                    break
+
+        data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
+        img_dir = os.path.join(data_dir, "projects", project_id, "images")
+        os.makedirs(img_dir, exist_ok=True)
+
+        MAJOR_HEADING_PATTERN = re.compile(
+            r'^(?:'
+            r'(\d{1,2}\.?\s+[A-Z][\w\s\-/,\(\)]{2,})'
+            r'|'
+            r'(Abstract|Conclusion|Conclusions|References|Bibliography|Acknowledgements|Appendix(?:\s+[A-Z0-9]+)?)'
+            r'|'
+            r'((?:Chapter|Chương|Part|Phần|Section|Hồi|Mục)\s+([0-9ivxlc]+|[a-z]+)[:\s\.\-]*(.*))'
+            r')$',
+            re.IGNORECASE
+        )
+        SUB_HEADING_PATTERN = re.compile(
+            r'^(?:\d+\.)+\d+\s+([A-Z][\w\s\-/,\(\)]{2,})$'
+        )
+        FIG_CAPTION_PATTERN = re.compile(
+            r'^(?:Figure|Fig\.?)\s*([\d\.\-]+)[:\.]?\s*(.*)',
+            re.IGNORECASE
+        )
+        TAB_CAPTION_PATTERN = re.compile(
+            r'^(?:Table|Bảng)\s*([\d\.\-]+)[:\.]?\s*(.*)',
+            re.IGNORECASE
+        )
+
+        chapters: List[BookChapter] = []
+        p_global_idx = 0
+        chap_idx = 0
+        current_paras: List[BookParagraph] = []
+        current_title = "Phần mở đầu / Tiêu đề"
+        current_lines: List[str] = []
+
+        def flush_para(tag: str = "p"):
+            nonlocal current_lines, current_paras, p_global_idx
+            if not current_lines:
+                return
+            text = ""
+            for l in current_lines:
+                l = l.strip()
+                if not l:
+                    continue
+                if text.endswith("-"):
+                    text = text[:-1] + l
+                else:
+                    text = (text + " " + l).strip() if text else l
+            current_lines = []
+            if len(text) >= 2:
+                p_global_idx += 1
+                current_paras.append(BookParagraph(
+                    id=f"c{chap_idx}_p{p_global_idx}",
+                    original_text=text,
+                    tag=tag,
+                    index=p_global_idx
+                ))
+
+        def flush_chapter(next_title: str):
+            nonlocal current_paras, chapters, current_title, chap_idx
+            flush_para()
+            if current_paras:
+                chapters.append(BookChapter(
+                    id=f"chap_{chap_idx}",
+                    title=current_title,
+                    paragraphs=current_paras,
+                    doc_name=f"Section_{chap_idx}",
+                    order=chap_idx
+                ))
+                chap_idx += 1
+                current_paras = []
+            current_title = next_title
+
+        for page_num, page in enumerate(doc):
+            # 1. Detect and render Tables
+            tabs = page.find_tables()
+            table_records = []
+            table_rects = []
+            drawings = page.get_drawings()
+            blocks = page.get_text("blocks")
+
+            if tabs.tables:
+                for t_idx, tab in enumerate(tabs.tables):
+                    t_rect = pymupdf.Rect(tab.bbox)
+                    if t_rect.width > 60 and t_rect.height > 30:
+                        img_name = f"p{page_num + 1}_tab_{t_idx + 1}.png"
+                        img_path = os.path.join(img_dir, img_name)
+                        pix = page.get_pixmap(clip=t_rect, dpi=250)
+                        pix.save(img_path)
+                        table_records.append({"rect": t_rect, "img_path": img_path, "consumed": False})
+                        table_rects.append(t_rect)
+
+            # Check if any Table captions exist without detected table rect (e.g. borderless tables)
+            for b in blocks:
+                if b[6] != 0:
+                    continue
+                t_first = b[4].strip().splitlines()[0].strip() if b[4].strip() else ""
+                if TAB_CAPTION_PATTERN.match(t_first):
+                    cap_r = pymupdf.Rect(b[:4])
+                    if not any(cap_r.intersects(tr) or abs(tr.y0 - cap_r.y1) < 40 for tr in table_rects):
+                        d_below = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= cap_r.y1 + 450]
+                        if len(d_below) >= 2:
+                            x0 = max(0, min(d['rect'].x0 for d in d_below) - 6)
+                            y0 = max(0, min(d['rect'].y0 for d in d_below) - 4)
+                            x1 = min(page.rect.width, max(d['rect'].x1 for d in d_below) + 6)
+                            y1 = min(page.rect.height, max(d['rect'].y1 for d in d_below) + 10)
+                            derived_rect = pymupdf.Rect(x0, y0, x1, y1)
+                            img_name = f"p{page_num + 1}_tab_{len(table_records) + 1}.png"
+                            img_path = os.path.join(img_dir, img_name)
+                            pix = page.get_pixmap(clip=derived_rect, dpi=250)
+                            pix.save(img_path)
+                            table_records.append({"rect": derived_rect, "img_path": img_path, "consumed": False})
+                            table_rects.append(derived_rect)
+
+            # 2. Extract Figures (Raster images, vector diagrams, and Form XObjects)
+            raster_imgs = page.get_images()
+            page_fig_captions = []
+            for b in blocks:
+                if b[6] != 0:
+                    continue
+                first_line = b[4].strip().splitlines()[0].strip() if b[4].strip() else ""
+                m_fig = FIG_CAPTION_PATTERN.match(first_line)
+                if m_fig:
+                    page_fig_captions.append((pymupdf.Rect(b[:4]), first_line, m_fig.group(1)))
+
+            figure_images = {}
+            consumed_xrefs = set()
+            fig_boxes = []
+
+            for cap_rect, cap_text, fig_id in page_fig_captions:
+                matched_raster = False
+                for img_info in raster_imgs:
+                    xref = img_info[0]
+                    if xref in consumed_xrefs:
+                        continue
+                    img_rects = page.get_image_rects(xref)
+                    for ir in img_rects:
+                        if abs(ir.y1 - cap_rect.y0) < 250 or abs(ir.y0 - cap_rect.y1) < 250:
+                            base = doc.extract_image(xref)
+                            out_f = os.path.join(img_dir, f"p{page_num+1}_fig_{fig_id}.png")
+                            with open(out_f, "wb") as f:
+                                f.write(base["image"])
+                            figure_images[fig_id] = out_f
+                            consumed_xrefs.add(xref)
+                            fig_boxes.append(ir)
+                            matched_raster = True
+                            break
+                    if matched_raster:
+                        break
+
+                if not matched_raster:
+                    rel_drawings = [
+                        d for d in drawings
+                        if (d["rect"].y1 <= cap_rect.y0 + 10 and d["rect"].y0 >= max(0, cap_rect.y0 - 450))
+                    ]
+                    if len(rel_drawings) >= 5:
+                        x0 = max(0, min(d['rect'].x0 for d in rel_drawings) - 6)
+                        y0 = max(0, min(d['rect'].y0 for d in rel_drawings) - 6)
+                        x1 = min(page.rect.width, max(d['rect'].x1 for d in rel_drawings) + 6)
+                        y1 = min(page.rect.height, max(d['rect'].y1 for d in rel_drawings) + 6)
+                        bbox = pymupdf.Rect(x0, y0, x1, y1)
+                        pix = page.get_pixmap(clip=bbox, dpi=200)
+                        out_f = os.path.join(img_dir, f"p{page_num+1}_fig_{fig_id}.png")
+                        pix.save(out_f)
+                        figure_images[fig_id] = out_f
+                        fig_boxes.append(bbox)
+
+            # Standalone images
+            standalone_imgs = []
+            for img_idx, img_info in enumerate(raster_imgs):
+                xref = img_info[0]
+                if xref in consumed_xrefs:
+                    continue
+                try:
+                    base = doc.extract_image(xref)
+                    if base.get("width", 0) > 80 and base.get("height", 0) > 80:
+                        out_f = os.path.join(img_dir, f"p{page_num+1}_img_{img_idx+1}.png")
+                        with open(out_f, "wb") as f:
+                            f.write(base["image"])
+                        standalone_imgs.append(out_f)
+                except Exception:
+                    pass
+
+            # 3. Process text blocks with table & figure content filtering
+            for b in blocks:
+                if b[6] != 0:
+                    continue
+                b_rect = pymupdf.Rect(b[:4])
+
+                # Exclude block if inside table bbox
+                in_table = False
+                for t in table_records:
+                    if b_rect.intersects(t["rect"]):
+                        inter = b_rect & t["rect"]
+                        if inter.get_area() > 0.35 * b_rect.get_area():
+                            in_table = True
+                            break
+                if in_table:
+                    continue
+
+                # Exclude block if inside vector figure diagram
+                in_fig = False
+                for fb in fig_boxes:
+                    if b_rect.intersects(fb):
+                        inter = b_rect & fb
+                        if inter.get_area() > 0.5 * b_rect.get_area():
+                            in_fig = True
+                            break
+                if in_fig:
+                    continue
+
+                lines = [l.strip() for l in b[4].splitlines() if l.strip()]
+                if not lines:
+                    continue
+
+                for l_idx, line in enumerate(lines):
+                    m_major = MAJOR_HEADING_PATTERN.match(line)
+                    if m_major and len(line) < 75 and not line.endswith(('.', ',', ';')):
+                        flush_chapter(line)
+                        continue
+
+                    m_sub = SUB_HEADING_PATTERN.match(line)
+                    if m_sub and len(line) < 75 and not line.endswith(('.', ',', ';')):
+                        flush_para()
+                        current_lines.append(line)
+                        flush_para(tag="h3")
+                        continue
+
+                    m_tab = TAB_CAPTION_PATTERN.match(line)
+                    if m_tab:
+                        flush_para()
+                        for t in table_records:
+                            if not t["consumed"]:
+                                t["consumed"] = True
+                                p_global_idx += 1
+                                current_paras.append(BookParagraph(
+                                    id=f"c{chap_idx}_tab{p_global_idx}",
+                                    original_text=f"[{line[:100]}]",
+                                    translated_text=f"[{line[:100]}]",
+                                    status="done",
+                                    tag="img",
+                                    index=p_global_idx,
+                                    image_path=t["img_path"]
+                                ))
+                                break
+                        current_lines.append(line)
+                        flush_para(tag="h3")
+                        continue
+
+                    m_fig = FIG_CAPTION_PATTERN.match(line)
+                    if m_fig:
+                        flush_para()
+                        fig_key = m_fig.group(1)
+                        if fig_key in figure_images:
+                            p_global_idx += 1
+                            current_paras.append(BookParagraph(
+                                id=f"c{chap_idx}_fig{p_global_idx}",
+                                original_text=f"[Minh họa: {line[:100]}]",
+                                translated_text=f"[Minh họa: {line[:100]}]",
+                                status="done",
+                                tag="img",
+                                index=p_global_idx,
+                                image_path=figure_images.pop(fig_key)
+                            ))
+                        current_lines.append(line)
+                        flush_para(tag="p")
+                        continue
+
+                    is_bullet = line.startswith(('•', '–', '- ', '* '))
+                    is_ref_item = bool(re.match(r'^\[\d+\]\s+[A-Z]', line))
+                    if is_bullet or is_ref_item:
+                        flush_para()
+                        current_lines.append(line)
+                        continue
+
+                    current_lines.append(line)
+                    ends_sentence = line.endswith(('.', '!', '?', ':', '."'))
+                    if ends_sentence:
+                        flush_para()
+
+            # End of page: check remaining unconsumed tables/figures/images
+            for t in table_records:
+                if not t["consumed"]:
+                    flush_para()
+                    p_global_idx += 1
+                    current_paras.append(BookParagraph(
+                        id=f"c{chap_idx}_tab{p_global_idx}",
+                        original_text=f"[Bảng trang {page_num + 1}]",
+                        translated_text=f"[Bảng trang {page_num + 1}]",
+                        status="done",
+                        tag="img",
+                        index=p_global_idx,
+                        image_path=t["img_path"]
+                    ))
+                    t["consumed"] = True
+
+            for fig_key, f_path in list(figure_images.items()):
+                flush_para()
+                p_global_idx += 1
+                current_paras.append(BookParagraph(
+                    id=f"c{chap_idx}_fig{p_global_idx}",
+                    original_text=f"[Hình {fig_key}]",
+                    translated_text=f"[Hình {fig_key}]",
+                    status="done",
+                    tag="img",
+                    index=p_global_idx,
+                    image_path=f_path
+                ))
+            figure_images.clear()
+
+            for s_img in standalone_imgs:
+                flush_para()
+                p_global_idx += 1
+                current_paras.append(BookParagraph(
+                    id=f"c{chap_idx}_img{p_global_idx}",
+                    original_text=f"[Minh họa trang {page_num + 1}]",
+                    translated_text=f"[Minh họa trang {page_num + 1}]",
+                    status="done",
+                    tag="img",
+                    index=p_global_idx,
+                    image_path=s_img
+                ))
+
+        flush_chapter("End")
+
+        return BookProject(
+            id=project_id,
+            title=title,
+            author=author,
+            source_format="pdf",
+            source_file_path=file_path,
+            chapters=chapters
+        )
+
+    @staticmethod
+    def _parse_pdf_pypdf(file_path: str, project_id: str) -> BookProject:
         reader = pypdf.PdfReader(file_path)
         meta = reader.metadata
         raw_name = os.path.splitext(os.path.basename(file_path))[0]
-        # Clean hash/project_id prefix like "76f1b7f2_Transformer"
         clean_name = re.sub(r'^[0-9a-f]{8}_', '', raw_name)
         title = meta.title if (meta and meta.title and meta.title.strip()) else clean_name
         author = meta.author if (meta and meta.author and meta.author.strip()) else "Tác giả không rõ"
@@ -316,7 +682,7 @@ class BookParser:
                 current_paras = []
             current_title = next_title
 
-        # Check if first page contains paper title (e.g. line in title case before abstract)
+        # Check if first page contains paper title
         if reader.pages:
             first_page_text = reader.pages[0].extract_text() or ""
             f_lines = [l.strip() for l in first_page_text.splitlines() if l.strip()]
@@ -334,7 +700,6 @@ class BookParser:
         os.makedirs(img_dir, exist_ok=True)
 
         for page_num, page in enumerate(reader.pages):
-            # Extract any embedded images on this page
             page_images: List[str] = []
             try:
                 if hasattr(page, "images"):
@@ -352,22 +717,18 @@ class BookParser:
             if not raw_lines and not page_images:
                 continue
 
-            # Filter standalone page number footer at bottom of page
             if raw_lines and re.match(r'^\d+$', raw_lines[-1]):
                 raw_lines.pop()
 
-            # Compute typical line length for justified paragraphs on this page
             long_lines = [len(l) for l in raw_lines if len(l) > 30 and not l.endswith(('.', ':', ';'))]
             avg_line_len = (sum(long_lines) / len(long_lines)) if long_lines else 80
 
             for l_idx, line in enumerate(raw_lines):
-                # Check major heading (Starts a new Chapter/Section in TOC)
                 m_major = MAJOR_HEADING_PATTERN.match(line)
                 if m_major and len(line) < 75 and not line.endswith(('.', ',', ';')):
                     flush_chapter(line)
                     continue
 
-                # Check sub heading (e.g. 3.1, 3.2.1)
                 m_sub = SUB_HEADING_PATTERN.match(line)
                 if m_sub and len(line) < 75 and not line.endswith(('.', ',', ';')):
                     flush_para()
@@ -375,12 +736,10 @@ class BookParser:
                     flush_para(tag="h3")
                     continue
 
-                # Check special items (bullets, figures, tables, reference items [1])
                 is_bullet = line.startswith(('•', '–', '- ', '* '))
-                is_caption = bool(re.match(r'^(?:Figure|Table)\s+\d+[:\.]', line, re.I))
+                is_caption = bool(re.match(r'^(?:Figure|Fig\.?|Table)\s*[\d\.\-]+[:\.]?', line, re.I))
                 is_ref_item = bool(re.match(r'^\[\d+\]\s+[A-Z]', line))
 
-                # If Figure caption encountered and we have images on this page, insert image paragraph(s) before caption
                 if is_caption and "figure" in line.lower() and page_images:
                     flush_para()
                     for img_p in page_images:
@@ -402,8 +761,6 @@ class BookParser:
                     continue
 
                 current_lines.append(line)
-
-                # End of paragraph detection:
                 ends_sentence = line.endswith(('.', '!', '?', ':', '."'))
                 is_short_line = len(line) < (avg_line_len * 0.78)
 
@@ -413,14 +770,13 @@ class BookParser:
                     if (MAJOR_HEADING_PATTERN.match(next_l) or 
                         SUB_HEADING_PATTERN.match(next_l) or 
                         next_l.startswith(('•', '–', '- ', '* ')) or 
-                        re.match(r'^(?:Figure|Table)\s+\d+[:\.]', next_l, re.I) or
+                        re.match(r'^(?:Figure|Fig\.?|Table)\s*[\d\.\-]+[:\.]?', next_l, re.I) or
                         re.match(r'^\[\d+\]\s+[A-Z]', next_l)):
                         next_starts_new_block = True
 
                 if ends_sentence and (is_short_line or next_starts_new_block):
                     flush_para()
 
-            # If any remaining images on this page were not associated with a figure caption
             if page_images:
                 flush_para()
                 for img_p in page_images:

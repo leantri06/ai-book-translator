@@ -8,6 +8,10 @@ import zipfile
 import tempfile
 import shutil
 import unicodedata
+import io
+import html
+import hashlib
+import base64
 from typing import Optional, List
 from bs4 import BeautifulSoup
 import ebooklib
@@ -70,6 +74,119 @@ def latex_to_mathml(latex_str: str, display: bool = False) -> str:
         return mathml
     except Exception:
         return unicode_math_fallback(clean_latex)
+
+
+_MATH_IMG_CACHE = {}  # {md5_hash: png_bytes}
+
+
+def render_latex_to_png(latex_str: str, dpi: int = 250) -> tuple[str, bytes]:
+    """
+    Renders LaTeX formula to a high-resolution transparent PNG image.
+    Returns (img_filename, png_bytes).
+    Uses caching to render each unique formula only once.
+    """
+    clean_latex = latex_str.strip()
+    if clean_latex.startswith('$') and clean_latex.endswith('$'):
+        clean_latex = clean_latex[1:-1].strip()
+    if clean_latex.startswith('$$') and clean_latex.endswith('$$'):
+        clean_latex = clean_latex[2:-2].strip()
+
+    # Pre-clean known macros for mathtext compatibility
+    clean_latex = clean_latex.replace(r'\bm{', r'\mathbf{')
+    clean_latex = clean_latex.replace(r'\boldsymbol{', r'\mathbf{')
+    clean_latex = clean_latex.replace(r'\bold{', r'\mathbf{')
+
+    hash_key = hashlib.md5(f"{clean_latex}_{dpi}".encode('utf-8')).hexdigest()[:12]
+    img_filename = f"math_{hash_key}.png"
+
+    if hash_key in _MATH_IMG_CACHE:
+        return img_filename, _MATH_IMG_CACHE[hash_key]
+
+    try:
+        import matplotlib.mathtext as mathtext
+        buf = io.BytesIO()
+        mathtext.math_to_image(clean_latex, buf, dpi=dpi, format='png')
+        png_bytes = buf.getvalue()
+        _MATH_IMG_CACHE[hash_key] = png_bytes
+        return img_filename, png_bytes
+    except Exception:
+        return "", b""
+
+
+def format_math_for_epub(text: str, math_store: dict) -> tuple[str, bool]:
+    """
+    Parses LaTeX formulas from text and converts them to <img> tags referencing
+    crisp math PNG images embedded in the EPUB (100% Kindle compatible).
+    Returns (formatted_html, has_math).
+    """
+    text = normalize_text(text)
+    has_math = False
+
+    # 1. Numbered standalone equation at start: e.g. Attention(...) = ... (1) Rest of paragraph
+    eq_match = re.match(r'^(.*?\\frac\{[^}]+\}\{[^}]+\}[^\n]*?)\s*\((\d+)\)\s+([A-Z\u00C0-\u1EF9].*)$', text, re.DOTALL)
+    extra_block = ""
+    if eq_match:
+        eq_part = eq_match.group(1).strip()
+        eq_num = eq_match.group(2)
+        text = eq_match.group(3).strip()
+        has_math = True
+        fn, img_bytes = render_latex_to_png(eq_part, dpi=250)
+        if fn and img_bytes:
+            math_store[fn] = img_bytes
+            safe_alt = html.escape(eq_part, quote=True)
+            extra_block = f'<div class="math-block math-equation"><div class="math-formula"><img src="images/{fn}" class="math-display-img" alt="{safe_alt}" /></div><div class="eq-num">({eq_num})</div></div>\n'
+        else:
+            extra_block = f'<div class="math-block math-equation"><div class="math-formula">{unicode_math_fallback(eq_part)}</div><div class="eq-num">({eq_num})</div></div>\n'
+
+    # 2. Display math $$...$$
+    def rep_display(m):
+        nonlocal has_math
+        has_math = True
+        content = m.group(1).strip()
+        fn, img_bytes = render_latex_to_png(content, dpi=250)
+        if fn and img_bytes:
+            math_store[fn] = img_bytes
+            safe_alt = html.escape(content, quote=True)
+            return f'<div class="math-block"><img src="images/{fn}" class="math-display-img" alt="{safe_alt}" /></div>'
+        else:
+            return f'<div class="math-block">{unicode_math_fallback(content)}</div>'
+
+    text = re.sub(r'\$\$([^\$]+)\$\$', rep_display, text)
+
+    # 3. Inline math $...$
+    def rep_inline(m):
+        nonlocal has_math
+        content = m.group(1).strip()
+        if re.match(r'^\d+(\.\d+)?$', content):
+            return f"${content}$"
+        has_math = True
+        fn, img_bytes = render_latex_to_png(content, dpi=250)
+        if fn and img_bytes:
+            math_store[fn] = img_bytes
+            safe_alt = html.escape(content, quote=True)
+            return f'<img src="images/{fn}" class="math-inline-img" alt="{safe_alt}" />'
+        else:
+            return unicode_math_fallback(content)
+
+    text = re.sub(r'\$([^\$]+)\$', rep_inline, text)
+
+    # 4. Residual bare LaTeX expressions like \frac{...}{...}
+    def rep_bare_frac(m):
+        nonlocal has_math
+        has_math = True
+        content = m.group(0).strip()
+        fn, img_bytes = render_latex_to_png(content, dpi=250)
+        if fn and img_bytes:
+            math_store[fn] = img_bytes
+            safe_alt = html.escape(content, quote=True)
+            return f'<img src="images/{fn}" class="math-inline-img" alt="{safe_alt}" />'
+        else:
+            return unicode_math_fallback(content)
+
+    text = re.sub(r'\\frac\{[^{}]*\}\{[^{}]*\}', rep_bare_frac, text)
+
+    final_html = extra_block + text if extra_block else text
+    return final_html, has_math
 
 
 def format_math_in_html(text: str) -> tuple[str, bool]:
@@ -260,7 +377,7 @@ class BookExporter:
         epub_chapters = []
         toc = []
 
-        # Vietnamese-optimized typography with MathML support
+        # Vietnamese-optimized typography with MathML and Kindle Math Image support
         style = '''
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Times New Roman", "Palatino Linotype", Arial, sans-serif;
@@ -292,6 +409,21 @@ class BookExporter:
             color: #1a202c;
             margin-bottom: 14px;
         }
+        .math-inline-img {
+            display: inline-block;
+            vertical-align: -0.22em;
+            max-height: 1.45em;
+            width: auto;
+            height: auto;
+        }
+        .math-display-img {
+            display: block;
+            margin: 8px auto;
+            max-width: 95%;
+            max-height: 5.5em;
+            width: auto;
+            height: auto;
+        }
         .math-block {
             text-align: center;
             margin: 1.4em 0;
@@ -322,9 +454,35 @@ class BookExporter:
             font-family: "Cambria Math", "Latin Modern Math", "Times New Roman", serif;
             font-style: italic;
         }
+        .math-inline-img {
+            display: inline-block;
+            vertical-align: -0.22em;
+            max-height: 1.45em;
+            width: auto;
+            height: auto;
+        }
+        .math-display-img {
+            display: block;
+            margin: 8px auto;
+            max-width: 95%;
+            max-height: 5.5em;
+            width: auto;
+            height: auto;
+        }
+        @media (prefers-color-scheme: dark) {
+            .math-inline-img, .math-display-img {
+                filter: invert(1);
+            }
+            .math-block {
+                background: #1e293b;
+            }
+        }
         '''
         default_css = epub.EpubItem(uid="style_default", file_name="style/default.css", media_type="text/css", content=style)
         book.add_item(default_css)
+
+        added_images = set()
+        math_store = {}
 
         for i, chap in enumerate(project.chapters):
             c_item = epub.EpubHtml(title=normalize_text(chap.title), file_name=f"chap_{i}.xhtml", lang="vi")
@@ -337,26 +495,28 @@ class BookExporter:
                 if (p.tag == "img" or getattr(p, "image_path", "")) and p.image_path and os.path.exists(p.image_path):
                     img_filename = f"img_{os.path.basename(p.image_path)}"
                     try:
-                        with open(p.image_path, "rb") as f_img:
-                            epub_img = epub.EpubItem(
-                                uid=f"img_{i}_{p.id}",
-                                file_name=f"images/{img_filename}",
-                                media_type="image/png" if p.image_path.lower().endswith(".png") else "image/jpeg",
-                                content=f_img.read()
-                            )
-                            book.add_item(epub_img)
-                            html_parts.append(f'<div style="text-align: center; margin: 18px 0;"><img src="images/{img_filename}" style="max-width: 100%; height: auto;" /></div>')
+                        if img_filename not in added_images:
+                            with open(p.image_path, "rb") as f_img:
+                                epub_img = epub.EpubItem(
+                                    uid=f"img_{i}_{p.id}",
+                                    file_name=f"images/{img_filename}",
+                                    media_type="image/png" if p.image_path.lower().endswith(".png") else "image/jpeg",
+                                    content=f_img.read()
+                                )
+                                book.add_item(epub_img)
+                                added_images.add(img_filename)
+                        html_parts.append(f'<div style="text-align: center; margin: 18px 0;"><img src="images/{img_filename}" style="max-width: 100%; height: auto;" /></div>')
                     except Exception:
                         pass
                     continue
 
                 trans = p.translated_text.strip() if p.translated_text.strip() else p.original_text
-                trans_html, has_m = format_math_in_html(trans)
+                trans_html, has_m = format_math_for_epub(trans, math_store)
                 if has_m:
                     chap_has_math = True
 
                 if bilingual:
-                    orig_html, _ = format_math_in_html(p.original_text)
+                    orig_html, _ = format_math_for_epub(p.original_text, math_store)
                     html_parts.append(f'<div class="bilingual-en">{orig_html}</div>')
                     html_parts.append(f'<p class="bilingual-vi">{trans_html}</p>')
                 else:
@@ -389,6 +549,18 @@ class BookExporter:
             book.add_item(c_item)
             epub_chapters.append(c_item)
             toc.append(c_item)
+
+        # Add all generated math images to the EPUB archive
+        for fn, img_bytes in math_store.items():
+            if fn not in added_images and img_bytes:
+                math_item = epub.EpubItem(
+                    uid=f"math_{fn.replace('.', '_')}",
+                    file_name=f"images/{fn}",
+                    media_type="image/png",
+                    content=img_bytes
+                )
+                book.add_item(math_item)
+                added_images.add(fn)
 
         book.toc = tuple(toc)
         book.add_item(epub.EpubNcx())
@@ -650,6 +822,26 @@ class BookExporter:
         .math-fallback {{
             font-family: "Cambria Math", "Latin Modern Math", "Times New Roman", serif;
             font-style: italic;
+        }}
+        .math-inline-img {{
+            display: inline-block;
+            vertical-align: -0.22em;
+            max-height: 1.45em;
+            width: auto;
+            height: auto;
+        }}
+        .math-display-img {{
+            display: block;
+            margin: 8px auto;
+            max-width: 95%;
+            max-height: 5.5em;
+            width: auto;
+            height: auto;
+        }}
+        @media (prefers-color-scheme: dark) {{
+            .math-inline-img, .math-display-img {{
+                filter: invert(1);
+            }}
         }}
         @media print {{
             body {{ padding: 0; background: #fff; color: #000; }}

@@ -1,8 +1,8 @@
-# 📚 AI Book & Research Paper Translator Pro (V3.1)
+# 📚 AI Book & Research Paper Translator Pro (V3.2)
 
 <p align="center">
   <strong>Phần mềm dịch sách & bài báo khoa học tiếng Anh sang tiếng Việt chuyên sâu với chất lượng xuất bản cao cấp</strong><br>
-  <em>Hỗ trợ chạy song song đa luồng nhiều API Key, tự động bóc tách mục lục học thuật, bảo toàn công thức toán học, giữ ảnh minh họa, định nghĩa nhân vật & xưng hô đồng nhất.</em>
+  <em>Hỗ trợ chạy song song đa luồng nhiều API Key, bóc tách bảng biểu & sơ đồ vector, công thức toán chuẩn Kindle (EPUB), định nghĩa nhân vật & xưng hô đồng nhất.</em>
 </p>
 
 <p align="center">
@@ -74,9 +74,10 @@
 ### 9. 🔬 Chuyên Sâu Dịch Bài Báo Khoa Học & Nghiên Cứu (Academic / AI Papers)
 - **Tự động bóc tách mục lục chuẩn Paper**: Nhận diện thông minh các đề mục học thuật như `Abstract`, `1 Introduction`, `2 Background`, `3 Model Architecture`, `4 Why Self-Attention`, `5 Training`, `6 Results`, `7 Conclusion`, `References`... thành từng chương riêng biệt.
 - **Tái tạo đoạn văn thông minh (Smart Paragraph Reconstruction)**: Tự động ghép nối các từ bị gãy dấu gạch nối cuối dòng (`transduc-\n tion` ➔ `transduction`), phát hiện chuẩn xác ranh giới đoạn văn theo cấu trúc căn lề, chấm dứt hoàn toàn tình trạng dính chữ dính đoạn.
-- **Hiển thị công thức toán chuẩn quốc tế (Native MathML & Math Blocks)**: Tự động chuyển đổi toàn bộ công thức toán học từ LaTeX sang chuẩn **MathML** của EPUB 3 và HTML (`<math xmlns="http://www.w3.org/1998/Math/MathML">`), hiển thị phân số ($\frac{QK^T}{\sqrt{d_k}}$), căn thức, chỉ số dưới/trên sắc nét và căn phải số thứ tự phương trình `(1)`, `(2)` chuẩn tạp chí khoa học mà không phụ thuộc JavaScript.
+- **Bảo tồn Bảng biểu chuyên nghiệp (Table Image Rendering & Anti-Leak)**: Tự động phát hiện vị trí các bảng biểu (chuẩn LaTeX booktabs) và kết xuất bảng thành ảnh PNG độ nét cao (250 DPI). **Loại trừ triệt để dữ liệu số liệu thô trong bảng khỏi luồng dịch văn bản**, ngăn chặn AI dịch nhầm số liệu thành các câu kỳ dị, giữ lại tiêu đề bảng để dịch chuẩn xác sang tiếng Việt.
+- **Trích xuất 100% Sơ đồ Vector & Hình ảnh (PyMuPDF Vector Engine)**: Quét và trích xuất không chỉ ảnh raster thông thường mà cả các **sơ đồ Vector Graphics**, Form XObjects (`/Subtype /Form`), hình vẽ kiến trúc, biểu đồ đồ thị trực quan (Attention plots) và kết xuất thành ảnh PNG 200 DPI sắc nét.
+- **Công thức Toán chuẩn Amazon Kindle (Kindle Math Engine)**: Chấm dứt tình trạng máy đọc sách Kindle nuốt mất thẻ MathML. Tự động chuyển đổi công thức LaTeX sang ảnh PNG 300 DPI nền trong suốt với căn lề tự nhiên (`.math-inline-img` và `.math-display-img`), tương thích hoàn hảo 100% với Kindle Paperwhite, Oasis, Scribe, ứng dụng Kindle và hỗ trợ Dark Mode.
 - **Khắc phục triệt để lỗi Font chữ tiếng Việt (Unicode NFC & Modern Font Stack)**: Chuẩn hóa toàn bộ văn bản sang mã dựng sẵn Unicode NFC và áp dụng font stack tối ưu (`Segoe UI`, `-apple-system`, `Times New Roman`), loại bỏ hoàn toàn hiện tượng rơi chữ hoặc cách dấu lắt nhắt (`t ầ ng` ➔ `tầng`) trên Calibre, Kindle và Kobo.
-- **Trích xuất ảnh & Nhúng sơ đồ vào file xuất bản (EPUB, Word, HTML, PDF)**: Tự động trích xuất toàn bộ hình ảnh, biểu đồ từ file PDF (Figure 1, Figure 2...) và nhúng sắc nét vào file EPUB, file Word (.docx), file HTML Reader (hỗ trợ in ra PDF giữ trọn vẹn cả chữ lẫn hình), cũng như hiển thị trực quan ngay trên giao diện đọc sách Dual Studio.
 - **Chuẩn hóa thuật ngữ AI / Khoa học máy tính**: Dịch nghĩa mượt mà kết hợp giữ thuật ngữ tiếng Anh trong ngoặc đơn (hoặc giữ nguyên các thuật ngữ quốc tế phổ biến như *Self-Attention*, *Transformer*, *Residual Connection*, *Softmax*, *Dropout*, *BLEU score*).
 
 ---
