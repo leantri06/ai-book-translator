@@ -281,6 +281,34 @@ def format_math_for_docx(text: str) -> str:
     return text
 
 
+def is_caption_para(p: BookParagraph) -> bool:
+    """Checks if paragraph is a table or figure caption."""
+    if not p:
+        return False
+    if getattr(p, 'tag', '') == 'caption':
+        return True
+    orig = p.original_text.strip()
+    trans = p.translated_text.strip()
+    pat = r'^(?:Figure|Fig\.?|Hình|Table|Bảng)\s*[\d\.\-]+[:\.\-–]'
+    return bool(re.match(pat, orig, re.I) or re.match(pat, trans, re.I))
+
+
+def format_caption_text(text: str) -> tuple[str, str]:
+    """Splits caption into (label, content), e.g. ('Hình 1:', 'Sơ đồ kiến trúc...')"""
+    text = normalize_text(text)
+    m = re.match(r'^(Figure\s*[\d\.\-]+[:\.\-–]|Fig\.?\s*[\d\.\-]+[:\.\-–]|Hình\s*[\d\.\-]+[:\.\-–]|Table\s*[\d\.\-]+[:\.\-–]|Bảng\s*[\d\.\-]+[:\.\-–])\s*(.*)$', text, re.I)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return "", text
+
+
+def is_academic_paper(project: BookProject) -> bool:
+    """Checks if project appears to be a scientific paper."""
+    if project.source_format == "pdf":
+        return any(c.title.strip().lower() in ("abstract", "tóm tắt", "phần mở đầu / tiêu đề") for c in project.chapters)
+    return any(c.title.strip().lower() in ("abstract", "tóm tắt") for c in project.chapters)
+
+
 class BookExporter:
     """Exports translated or bilingual books to various formats."""
 
@@ -415,19 +443,29 @@ class BookExporter:
             color: #2b6cb0;
             font-weight: 700;
         }
-        h1, h2 {
+        h1 {
             text-align: center;
         }
+        h2 {
+            font-size: 1.45em;
+            text-align: left;
+            border-bottom: 1.5px solid #cbd5e1;
+            padding-bottom: 6px;
+            margin-top: 1.8em;
+            margin-bottom: 0.8em;
+        }
         h3 {
-            font-size: 1.25em;
+            font-size: 1.22em;
             margin-top: 1.4em;
-            margin-bottom: 0.6em;
+            margin-bottom: 0.5em;
+            text-align: left;
         }
         h4 {
-            font-size: 1.1em;
+            font-size: 1.08em;
             margin-top: 1.2em;
             margin-bottom: 0.4em;
-            color: #2d3748;
+            color: #475569;
+            text-align: left;
         }
         p {
             text-indent: 1.5em;
@@ -444,6 +482,49 @@ class BookExporter:
         .bilingual-vi {
             color: #1a202c;
             margin-bottom: 14px;
+        }
+        .academic-figure, .academic-table-block {
+            margin: 22px auto;
+            text-align: center;
+            max-width: 98%;
+        }
+        .figure-caption, .table-caption {
+            font-size: 0.9em;
+            color: #4a5568;
+            line-height: 1.5;
+            margin-top: 6px;
+            margin-bottom: 6px;
+            text-indent: 0;
+            text-align: left;
+        }
+        .caption-label {
+            font-weight: bold;
+            color: #2b6cb0;
+        }
+        .caption-pair {
+            margin-top: 4px;
+        }
+        .caption-en {
+            color: #718096;
+            font-style: italic;
+            font-size: 0.88em;
+            margin-bottom: 4px;
+        }
+        .caption-vi {
+            color: #1a202c;
+            font-size: 0.95em;
+        }
+        .academic-footnotes {
+            margin-top: 24px;
+            padding-top: 12px;
+            border-top: 1px solid #e2e8f0;
+            font-size: 0.85em;
+            color: #718096;
+        }
+        .academic-footnote {
+            margin-bottom: 6px;
+            text-indent: 0;
+            text-align: left;
         }
         .math-inline-img {
             display: inline-block;
@@ -521,13 +602,22 @@ class BookExporter:
         math_store = {}
 
         for i, chap in enumerate(project.chapters):
-            c_item = epub.EpubHtml(title=normalize_text(chap.title), file_name=f"chap_{i}.xhtml", lang="vi")
+            chap_title = normalize_text(chap.title)
+            c_item = epub.EpubHtml(title=chap_title, file_name=f"chap_{i}.xhtml", lang="vi")
             c_item.add_item(default_css)
 
-            html_parts = [f"<h2>{normalize_text(chap.title)}</h2>"]
+            if chap_title in ("Phần mở đầu / Tiêu đề", "Title", "Header"):
+                html_parts = []
+            else:
+                html_parts = [f"<h2>{chap_title}</h2>"]
             chap_has_math = False
 
-            for p in chap.paragraphs:
+            paras = chap.paragraphs
+            p_idx = 0
+            while p_idx < len(paras):
+                p = paras[p_idx]
+
+                # Check if image paragraph
                 if (p.tag == "img" or getattr(p, "image_path", "")) and p.image_path and os.path.exists(p.image_path):
                     img_filename = f"img_{os.path.basename(p.image_path)}"
                     try:
@@ -541,15 +631,73 @@ class BookExporter:
                                 )
                                 book.add_item(epub_img)
                                 added_images.add(img_filename)
-                        html_parts.append(f'<div style="text-align: center; margin: 18px 0;"><img src="images/{img_filename}" style="max-width: 100%; height: auto;" /></div>')
                     except Exception:
                         pass
+
+                    caption_para = None
+                    if p_idx + 1 < len(paras) and is_caption_para(paras[p_idx + 1]):
+                        caption_para = paras[p_idx + 1]
+
+                    img_tag = f'<div style="text-align: center; margin: 8px 0;"><img src="images/{img_filename}" style="max-width: 100%; height: auto;" /></div>'
+
+                    if caption_para:
+                        cap_orig, _ = format_math_for_epub(caption_para.original_text.strip(), math_store)
+                        cap_trans_raw = caption_para.translated_text.strip() if caption_para.translated_text.strip() else caption_para.original_text.strip()
+                        cap_trans, _ = format_math_for_epub(cap_trans_raw, math_store)
+                        is_table = bool(re.search(r'^(?:Table|Bảng)\b', caption_para.original_text, re.I) or re.search(r'^(?:Table|Bảng)\b', caption_para.translated_text, re.I) or 'tab' in p.id)
+
+                        if bilingual:
+                            en_lbl, en_content = format_caption_text(cap_orig)
+                            vi_lbl, vi_content = format_caption_text(cap_trans)
+                            cap_block = f'''<div class="caption-pair">
+                                <div class="caption-en"><strong>{en_lbl}</strong> {en_content}</div>
+                                <div class="caption-vi"><strong>{vi_lbl}</strong> {vi_content}</div>
+                            </div>'''
+                        else:
+                            lbl, content = format_caption_text(cap_trans)
+                            if lbl:
+                                cap_block = f'<span class="caption-label">{lbl}</span> {content}'
+                            else:
+                                cap_block = cap_trans
+
+                        if is_table:
+                            html_parts.append(f'<div class="academic-table-block"><div class="table-caption">{cap_block}</div>{img_tag}</div>')
+                        else:
+                            html_parts.append(f'<figure class="academic-figure">{img_tag}<figcaption class="figure-caption">{cap_block}</figcaption></figure>')
+                        p_idx += 2
+                        continue
+                    else:
+                        html_parts.append(f'<div style="text-align: center; margin: 18px 0;"><img src="images/{img_filename}" style="max-width: 100%; height: auto;" /></div>')
+                        p_idx += 1
+                        continue
+
+                # Standalone caption
+                if is_caption_para(p):
+                    trans = p.translated_text.strip() if p.translated_text.strip() else p.original_text
+                    trans_html, _ = format_math_for_epub(trans, math_store)
+                    lbl, content = format_caption_text(trans_html)
+                    if lbl:
+                        html_parts.append(f'<div class="table-caption"><span class="caption-label">{lbl}</span> {content}</div>')
+                    else:
+                        html_parts.append(f'<div class="table-caption">{trans_html}</div>')
+                    p_idx += 1
                     continue
 
+                # Footnote
+                is_footnote = p.original_text.strip().startswith(('∗', '†', '‡', '*'))
                 trans = p.translated_text.strip() if p.translated_text.strip() else p.original_text
                 trans_html, has_m = format_math_for_epub(trans, math_store)
                 if has_m:
                     chap_has_math = True
+
+                if is_footnote:
+                    if bilingual:
+                        orig_html, _ = format_math_for_epub(p.original_text, math_store)
+                        html_parts.append(f'<div class="academic-footnote"><div class="bilingual-en">{orig_html}</div><div class="bilingual-vi">{trans_html}</div></div>')
+                    else:
+                        html_parts.append(f'<div class="academic-footnote">{trans_html}</div>')
+                    p_idx += 1
+                    continue
 
                 if bilingual:
                     orig_html, _ = format_math_for_epub(p.original_text, math_store)
@@ -566,6 +714,7 @@ class BookExporter:
                             html_parts.append(trans_html)
                     else:
                         html_parts.append(f'<{tag}>{trans_html}</{tag}>')
+                p_idx += 1
 
             if chap_has_math:
                 c_item.properties.append("mathml")
@@ -612,51 +761,224 @@ class BookExporter:
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         doc = docx.Document()
 
-        # Title Page
+        is_paper = is_academic_paper(project)
+
+        # Title Page / Header
         title_p = doc.add_paragraph()
         title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        title_p.paragraph_format.space_before = Pt(12)
+        title_p.paragraph_format.space_after = Pt(6)
         run = title_p.add_run(normalize_text(project.title))
         run.font.name = "Times New Roman"
-        run.font.size = Pt(26)
+        run.font.size = Pt(24)
         run.font.bold = True
         run.font.color.rgb = RGBColor(30, 41, 59)
 
         subtitle_p = doc.add_paragraph()
         subtitle_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        sub_text = "Bản dịch Tiếng Việt (AI Literary Edition)" if not bilingual else "Bản dịch Song Ngữ Anh - Việt"
+        subtitle_p.paragraph_format.space_before = Pt(2)
+        subtitle_p.paragraph_format.space_after = Pt(4)
+        if is_paper:
+            sub_text = "Bản dịch Học Thuật Tiếng Việt (AI Academic Edition)" if not bilingual else "Bản dịch Song Ngữ Anh - Việt (Academic Edition)"
+        else:
+            sub_text = "Bản dịch Tiếng Việt (AI Literary Edition)" if not bilingual else "Bản dịch Song Ngữ Anh - Việt"
         sub_run = subtitle_p.add_run(normalize_text(sub_text))
         sub_run.font.name = "Times New Roman"
-        sub_run.font.size = Pt(14)
+        sub_run.font.size = Pt(13)
         sub_run.font.italic = True
         sub_run.font.color.rgb = RGBColor(100, 116, 139)
 
         author_p = doc.add_paragraph()
         author_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        author_p.paragraph_format.space_before = Pt(2)
+        author_p.paragraph_format.space_after = Pt(18)
         author_run = author_p.add_run(f"Tác giả: {normalize_text(project.author)}")
         author_run.font.name = "Times New Roman"
-        author_run.font.size = Pt(12)
-        doc.add_page_break()
+        author_run.font.size = Pt(11.5)
+        author_run.font.color.rgb = RGBColor(71, 85, 105)
+
+        # Non-paper books get a full title page break
+        if not is_paper:
+            doc.add_page_break()
 
         for chap in project.chapters:
-            # Chapter heading
-            heading = doc.add_heading(normalize_text(chap.title), level=1)
-            heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            chap_title = normalize_text(chap.title)
 
-            for p in chap.paragraphs:
-                # Handle image paragraph
+            # Chapter heading (left-aligned for all academic and modern documents)
+            if chap_title not in ("Phần mở đầu / Tiêu đề", "Title", "Header"):
+                heading = doc.add_heading(chap_title, level=1)
+                heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                heading.paragraph_format.space_before = Pt(22)
+                heading.paragraph_format.space_after = Pt(8)
+                for run in heading.runs:
+                    run.font.name = "Times New Roman"
+                    run.font.size = Pt(15.5)
+                    run.font.bold = True
+                    run.font.color.rgb = RGBColor(43, 108, 176)
+
+            paras = chap.paragraphs
+            p_idx = 0
+            while p_idx < len(paras):
+                p = paras[p_idx]
+
+                # Check if image paragraph
                 if (p.tag == "img" or getattr(p, "image_path", "")) and p.image_path and os.path.exists(p.image_path):
-                    try:
-                        p_img = doc.add_paragraph()
-                        p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        p_img.paragraph_format.space_before = Pt(14)
-                        p_img.paragraph_format.space_after = Pt(6)
-                        p_img.add_run().add_picture(p.image_path, width=Inches(5.5))
-                    except Exception:
-                        pass
+                    caption_para = None
+                    if p_idx + 1 < len(paras) and is_caption_para(paras[p_idx + 1]):
+                        caption_para = paras[p_idx + 1]
+
+                    is_table = False
+                    if caption_para:
+                        is_table = bool(re.search(r'^(?:Table|Bảng)\b', caption_para.original_text, re.I) or re.search(r'^(?:Table|Bảng)\b', caption_para.translated_text, re.I) or 'tab' in p.id)
+
+                    def add_docx_caption(cap_p):
+                        trans_cap = format_math_for_docx(cap_p.translated_text.strip() if cap_p.translated_text.strip() else cap_p.original_text.strip())
+                        orig_cap = format_math_for_docx(cap_p.original_text.strip())
+                        if bilingual:
+                            en_p = doc.add_paragraph()
+                            en_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            en_p.paragraph_format.space_before = Pt(8)
+                            en_p.paragraph_format.space_after = Pt(2)
+                            r_en = en_p.add_run(orig_cap)
+                            r_en.font.name = "Times New Roman"
+                            r_en.font.size = Pt(9.5)
+                            r_en.font.italic = True
+                            r_en.font.color.rgb = RGBColor(100, 116, 139)
+
+                            vi_p = doc.add_paragraph()
+                            vi_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            vi_p.paragraph_format.space_before = Pt(2)
+                            vi_p.paragraph_format.space_after = Pt(12)
+                            lbl, content = format_caption_text(trans_cap)
+                            if lbl:
+                                r_lbl = vi_p.add_run(lbl + " ")
+                                r_lbl.font.name = "Times New Roman"
+                                r_lbl.font.size = Pt(10.5)
+                                r_lbl.font.bold = True
+                                r_lbl.font.color.rgb = RGBColor(43, 108, 176)
+                            r_vi = vi_p.add_run(content if lbl else trans_cap)
+                            r_vi.font.name = "Times New Roman"
+                            r_vi.font.size = Pt(10.5)
+                        else:
+                            vi_p = doc.add_paragraph()
+                            vi_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            vi_p.paragraph_format.space_before = Pt(8)
+                            vi_p.paragraph_format.space_after = Pt(10)
+                            lbl, content = format_caption_text(trans_cap)
+                            if lbl:
+                                r_lbl = vi_p.add_run(lbl + " ")
+                                r_lbl.font.name = "Times New Roman"
+                                r_lbl.font.size = Pt(10.5)
+                                r_lbl.font.bold = True
+                                r_lbl.font.color.rgb = RGBColor(43, 108, 176)
+                            r_vi = vi_p.add_run(content if lbl else trans_cap)
+                            r_vi.font.name = "Times New Roman"
+                            r_vi.font.size = Pt(10.5)
+
+                    def add_docx_image(img_path):
+                        try:
+                            p_img = doc.add_paragraph()
+                            p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            p_img.paragraph_format.space_before = Pt(6)
+                            p_img.paragraph_format.space_after = Pt(6)
+                            p_img.add_run().add_picture(img_path, width=Inches(5.5))
+                        except Exception:
+                            pass
+
+                    if is_table:
+                        # Table: Caption FIRST, Image NEXT
+                        if caption_para:
+                            add_docx_caption(caption_para)
+                        add_docx_image(p.image_path)
+                    else:
+                        # Figure: Image FIRST, Caption NEXT
+                        add_docx_image(p.image_path)
+                        if caption_para:
+                            add_docx_caption(caption_para)
+
+                    p_idx += (2 if caption_para else 1)
                     continue
 
-                trans = p.translated_text.strip() if p.translated_text.strip() else p.original_text
-                trans = format_math_for_docx(trans)
+                # Standalone caption without image
+                if is_caption_para(p):
+                    trans_cap = format_math_for_docx(p.translated_text.strip() if p.translated_text.strip() else p.original_text.strip())
+                    p_cap = doc.add_paragraph()
+                    p_cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    p_cap.paragraph_format.space_before = Pt(8)
+                    p_cap.paragraph_format.space_after = Pt(8)
+                    lbl, content = format_caption_text(trans_cap)
+                    if lbl:
+                        r_lbl = p_cap.add_run(lbl + " ")
+                        r_lbl.font.name = "Times New Roman"
+                        r_lbl.font.size = Pt(10.5)
+                        r_lbl.font.bold = True
+                        r_lbl.font.color.rgb = RGBColor(43, 108, 176)
+                    r_txt = p_cap.add_run(content if lbl else trans_cap)
+                    r_txt.font.name = "Times New Roman"
+                    r_txt.font.size = Pt(10.5)
+                    p_idx += 1
+                    continue
+
+                # Footnote paragraph (starts with ∗, †, ‡)
+                is_footnote = p.original_text.strip().startswith(('∗', '†', '‡', '*'))
+                trans = format_math_for_docx(p.translated_text.strip() if p.translated_text.strip() else p.original_text)
+
+                if is_footnote:
+                    fn_p = doc.add_paragraph()
+                    fn_p.paragraph_format.space_before = Pt(2)
+                    fn_p.paragraph_format.space_after = Pt(4)
+                    if bilingual:
+                        en_fn = format_math_for_docx(p.original_text)
+                        r1 = fn_p.add_run(en_fn + "\n")
+                        r1.font.name = "Times New Roman"
+                        r1.font.size = Pt(9)
+                        r1.font.italic = True
+                        r1.font.color.rgb = RGBColor(120, 130, 140)
+                    r2 = fn_p.add_run(trans)
+                    r2.font.name = "Times New Roman"
+                    r2.font.size = Pt(9.5)
+                    p_idx += 1
+                    continue
+
+                # Subheadings (h3, h4)
+                if p.tag == 'h3':
+                    h3_p = doc.add_paragraph()
+                    h3_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    h3_p.paragraph_format.space_before = Pt(14)
+                    h3_p.paragraph_format.space_after = Pt(4)
+                    if bilingual:
+                        en_h = format_math_for_docx(p.original_text)
+                        r_en = h3_p.add_run(en_h + "\n")
+                        r_en.font.name = "Times New Roman"
+                        r_en.font.size = Pt(10)
+                        r_en.font.italic = True
+                        r_en.font.color.rgb = RGBColor(100, 116, 139)
+                    r_vi = h3_p.add_run(trans)
+                    r_vi.font.name = "Times New Roman"
+                    r_vi.font.size = Pt(13)
+                    r_vi.font.bold = True
+                    r_vi.font.color.rgb = RGBColor(30, 41, 59)
+                    p_idx += 1
+                    continue
+                elif p.tag == 'h4':
+                    h4_p = doc.add_paragraph()
+                    h4_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    h4_p.paragraph_format.space_before = Pt(10)
+                    h4_p.paragraph_format.space_after = Pt(2)
+                    if bilingual:
+                        en_h = format_math_for_docx(p.original_text)
+                        r_en = h4_p.add_run(en_h + "\n")
+                        r_en.font.name = "Times New Roman"
+                        r_en.font.size = Pt(9.5)
+                        r_en.font.italic = True
+                        r_en.font.color.rgb = RGBColor(100, 116, 139)
+                    r_vi = h4_p.add_run(trans)
+                    r_vi.font.name = "Times New Roman"
+                    r_vi.font.size = Pt(11.5)
+                    r_vi.font.bold = True
+                    r_vi.font.color.rgb = RGBColor(71, 85, 105)
+                    p_idx += 1
+                    continue
 
                 if bilingual:
                     # English original
@@ -682,7 +1004,10 @@ class BookExporter:
                     para.paragraph_format.line_spacing = 1.3
                     para.paragraph_format.space_after = Pt(6)
 
-            doc.add_page_break()
+                p_idx += 1
+
+            if not is_paper:
+                doc.add_page_break()
 
         doc.save(output_path)
         return output_path
@@ -693,34 +1018,131 @@ class BookExporter:
         import base64
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
+        is_paper = is_academic_paper(project)
         chapters_html = []
         for chap in project.chapters:
+            chap_title = normalize_text(chap.title)
             chap_body = []
-            for p in chap.paragraphs:
+            paras = chap.paragraphs
+            p_idx = 0
+            while p_idx < len(paras):
+                p = paras[p_idx]
+
                 # Handle image paragraph (embed base64 so HTML is 100% standalone and printable to PDF)
                 if (p.tag == "img" or getattr(p, "image_path", "")) and p.image_path and os.path.exists(p.image_path):
+                    b64 = ""
+                    mime = "image/png" if p.image_path.lower().endswith(".png") else "image/jpeg"
                     try:
                         with open(p.image_path, "rb") as f_img:
                             b64 = base64.b64encode(f_img.read()).decode("utf-8")
-                        mime = "image/png" if p.image_path.lower().endswith(".png") else "image/jpeg"
-                        chap_body.append(f'''
-                        <div class="figure-wrapper" style="text-align: center; margin: 24px auto;">
-                            <img src="data:{mime};base64,{b64}" style="max-width: 95%; height: auto; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.12);" />
-                        </div>''')
                     except Exception:
                         pass
+
+                    caption_para = None
+                    if p_idx + 1 < len(paras) and is_caption_para(paras[p_idx + 1]):
+                        caption_para = paras[p_idx + 1]
+
+                    if b64:
+                        img_html = f'<img src="data:{mime};base64,{b64}" alt="Minh họa / Bảng biểu" />'
+                        if caption_para:
+                            cap_orig = format_math_in_html(caption_para.original_text.strip())[0]
+                            cap_trans_raw = caption_para.translated_text.strip() if caption_para.translated_text.strip() else caption_para.original_text.strip()
+                            cap_trans = format_math_in_html(cap_trans_raw)[0]
+                            is_table = bool(re.search(r'^(?:Table|Bảng)\b', caption_para.original_text, re.I) or re.search(r'^(?:Table|Bảng)\b', caption_para.translated_text, re.I) or 'tab' in p.id)
+
+                            if bilingual:
+                                en_lbl, en_content = format_caption_text(cap_orig)
+                                vi_lbl, vi_content = format_caption_text(cap_trans)
+                                cap_html = f'''<div class="caption-pair">
+                                    <div class="caption-en"><span class="cap-badge en">EN</span> <strong>{en_lbl}</strong> {en_content}</div>
+                                    <div class="caption-vi"><span class="cap-badge vi">VI</span> <strong>{vi_lbl}</strong> {vi_content}</div>
+                                </div>'''
+                            else:
+                                lbl, content = format_caption_text(cap_trans)
+                                if lbl:
+                                    cap_html = f'<span class="caption-label">{lbl}</span> <span class="caption-content">{content}</span>'
+                                else:
+                                    cap_html = cap_trans
+
+                            if is_table:
+                                chap_body.append(f'''
+                                <div class="academic-table-block" id="{p.id}">
+                                    <div class="table-caption">{cap_html}</div>
+                                    <div class="table-image-wrapper">{img_html}</div>
+                                </div>''')
+                            else:
+                                chap_body.append(f'''
+                                <figure class="academic-figure" id="{p.id}">
+                                    <div class="figure-image-wrapper">{img_html}</div>
+                                    <figcaption class="figure-caption">{cap_html}</figcaption>
+                                </figure>''')
+                            p_idx += 2
+                            continue
+                        else:
+                            chap_body.append(f'''
+                            <div class="figure-wrapper" style="text-align: center; margin: 24px auto;">
+                                <div class="figure-image-wrapper">{img_html}</div>
+                            </div>''')
+                            p_idx += 1
+                            continue
+
+                # Standalone caption without image
+                if is_caption_para(p):
+                    trans = p.translated_text.strip() if p.translated_text.strip() else p.original_text
+                    trans_html, _ = format_math_in_html(trans)
+                    if bilingual:
+                        orig_html, _ = format_math_in_html(p.original_text)
+                        en_lbl, en_content = format_caption_text(orig_html)
+                        vi_lbl, vi_content = format_caption_text(trans_html)
+                        chap_body.append(f'''
+                        <div class="table-caption" style="margin: 16px 0;">
+                            <div class="caption-pair">
+                                <div class="caption-en"><span class="cap-badge en">EN</span> <strong>{en_lbl}</strong> {en_content}</div>
+                                <div class="caption-vi"><span class="cap-badge vi">VI</span> <strong>{vi_lbl}</strong> {vi_content}</div>
+                            </div>
+                        </div>''')
+                    else:
+                        lbl, content = format_caption_text(trans_html)
+                        if lbl:
+                            chap_body.append(f'<div class="table-caption" style="margin: 16px 0;"><span class="caption-label">{lbl}</span> {content}</div>')
+                        else:
+                            chap_body.append(f'<div class="table-caption" style="margin: 16px 0;">{trans_html}</div>')
+                    p_idx += 1
                     continue
 
+                # Footnote paragraph (starts with ∗, †, ‡, *)
+                is_footnote = p.original_text.strip().startswith(('∗', '†', '‡', '*'))
                 trans = p.translated_text.strip() if p.translated_text.strip() else p.original_text
                 trans_html, _ = format_math_in_html(trans)
 
+                if is_footnote:
+                    if bilingual:
+                        orig_html, _ = format_math_in_html(p.original_text)
+                        chap_body.append(f'''
+                        <div class="academic-footnote">
+                            <div style="color: var(--muted-color); font-size: 0.88em; font-style: italic; margin-bottom: 3px;">{orig_html}</div>
+                            <div style="font-size: 0.95em;">{trans_html}</div>
+                        </div>''')
+                    else:
+                        chap_body.append(f'<div class="academic-footnote">{trans_html}</div>')
+                    p_idx += 1
+                    continue
+
                 if bilingual:
                     orig_html, _ = format_math_in_html(p.original_text)
-                    chap_body.append(f'''
-                    <div class="para-pair">
-                        <div class="en">{orig_html}</div>
-                        <div class="vi">{trans_html}</div>
-                    </div>''')
+                    is_h = p.tag in ('h1', 'h2', 'h3', 'h4')
+                    if is_h:
+                        chap_body.append(f'''
+                        <div class="heading-pair {p.tag}-pair" style="margin-top: 1.6em; margin-bottom: 0.6em;">
+                            <div class="en-heading" style="color: var(--muted-color); font-size: 0.85em; font-style: italic;">{orig_html}</div>
+                            <{p.tag} class="vi-heading" style="margin-top: 2px;">{trans_html}</{p.tag}>
+                        </div>''')
+                    else:
+                        chap_body.append(f'''
+                        <div class="para-pair">
+                            <div class="en">{orig_html}</div>
+                            <div class="vi">{trans_html}</div>
+                        </div>''')
                 else:
                     tag = p.tag if p.tag in ('h1', 'h2', 'h3', 'h4', 'blockquote') else 'p'
                     if trans_html.startswith('<div class="math-block'):
@@ -733,14 +1155,31 @@ class BookExporter:
                     else:
                         chap_body.append(f'<{tag}>{trans_html}</{tag}>')
 
+                p_idx += 1
+
+            # Chapter heading (left-aligned; suppress generic preamble title)
+            if chap_title in ("Phần mở đầu / Tiêu đề", "Title", "Header"):
+                h2_tag = ""
+            else:
+                h2_tag = f"<h2>{chap_title}</h2>"
+
             chapters_html.append(f'''
             <section class="chapter-section" id="{chap.id}">
-                <h2>{normalize_text(chap.title)}</h2>
+                {h2_tag}
                 <div class="chapter-content">
                     {"".join(chap_body)}
                 </div>
             </section>
             ''')
+
+        if is_paper:
+            sub_text_html = "Bản dịch Song Ngữ Anh - Việt (Academic Edition)" if bilingual else "Bản dịch Học Thuật Tiếng Việt (AI Academic Edition)"
+            section_margin_css = "margin-bottom: 48px;"
+            page_break_css = "page-break-after: auto;"
+        else:
+            sub_text_html = "Bản dịch Song Ngữ Anh - Việt" if bilingual else "Bản dịch Tiếng Việt (AI Literary Translation)"
+            section_margin_css = "margin-bottom: 80px;"
+            page_break_css = "page-break-after: always;"
 
         full_html = f'''<!DOCTYPE html>
 <html lang="vi">
@@ -777,52 +1216,60 @@ class BookExporter:
             -webkit-font-smoothing: antialiased;
         }}
         .book-container {{
-            max-width: 800px;
+            max-width: 820px;
             margin: 0 auto;
         }}
         header.book-header {{
             text-align: center;
-            padding: 60px 0 40px;
+            padding: 40px 0 30px;
             border-bottom: 2px solid var(--border-color);
-            margin-bottom: 60px;
+            margin-bottom: 40px;
             font-family: 'Plus Jakarta Sans', sans-serif;
         }}
         h1.book-title {{
-            font-size: 2.5rem;
+            font-size: 2.3rem;
             margin-bottom: 12px;
             font-weight: 700;
             color: var(--text-color);
+            line-height: 1.3;
         }}
         .book-author {{
-            font-size: 1.2rem;
+            font-size: 1.15rem;
             color: var(--muted-color);
         }}
         .chapter-section {{
-            margin-bottom: 80px;
-            page-break-after: always;
+            {section_margin_css}
+            {page_break_css}
         }}
         h2 {{
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 1.8rem;
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 1.65rem;
             color: var(--accent-color);
-            margin-bottom: 30px;
-            text-align: center;
-        }}
-        h3 {{
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 1.35rem;
-            color: var(--text-color);
-            margin-top: 1.8em;
+            margin-top: 2.2em;
             margin-bottom: 0.8em;
+            text-align: left;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--border-color);
+            letter-spacing: -0.01em;
             font-weight: 700;
         }}
-        h4 {{
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 1.15rem;
+        h3 {{
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 1.25rem;
             color: var(--text-color);
+            margin-top: 1.8em;
+            margin-bottom: 0.6em;
+            font-weight: 700;
+            text-align: left;
+        }}
+        h4 {{
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 1.08rem;
+            color: var(--muted-color);
             margin-top: 1.4em;
-            margin-bottom: 0.5em;
+            margin-bottom: 0.4em;
             font-weight: 600;
+            text-align: left;
         }}
         p {{
             margin-bottom: 1.2em;
@@ -841,9 +1288,113 @@ class BookExporter:
             font-size: 0.9em;
             font-style: italic;
             margin-bottom: 8px;
+            text-indent: 0;
         }}
         .para-pair .vi {{
             font-size: 1.05em;
+            text-indent: 0;
+        }}
+        .academic-figure {{
+            margin: 32px auto;
+            max-width: 100%;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+        }}
+        @media (prefers-color-scheme: dark) {{
+            .academic-figure, .academic-table-block {{
+                background: rgba(255, 255, 255, 0.02);
+            }}
+        }}
+        .figure-image-wrapper img, .table-image-wrapper img {{
+            max-width: 98%;
+            height: auto;
+            border-radius: 4px;
+            display: inline-block;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+        }}
+        .figure-caption, .table-caption {{
+            margin-top: 14px;
+            font-size: 0.92rem;
+            line-height: 1.55;
+            color: var(--text-color);
+            text-indent: 0;
+            text-align: left;
+            padding: 10px 14px;
+            background: rgba(125, 125, 125, 0.05);
+            border-radius: 6px;
+        }}
+        .academic-table-block {{
+            margin: 32px auto;
+            max-width: 100%;
+            background: rgba(0, 0, 0, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.03);
+            text-align: center;
+        }}
+        .academic-table-block .table-caption {{
+            margin-top: 0;
+            margin-bottom: 14px;
+        }}
+        .caption-label {{
+            font-weight: 700;
+            color: var(--accent-color);
+            margin-right: 6px;
+        }}
+        .caption-pair {{
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }}
+        .caption-en {{
+            font-size: 0.88rem;
+            color: var(--muted-color);
+            font-style: italic;
+        }}
+        .caption-vi {{
+            font-size: 0.94rem;
+            color: var(--text-color);
+        }}
+        .cap-badge {{
+            display: inline-block;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+            margin-right: 6px;
+            vertical-align: middle;
+            font-style: normal;
+        }}
+        .cap-badge.en {{
+            background: rgba(100, 116, 139, 0.15);
+            color: var(--muted-color);
+        }}
+        .cap-badge.vi {{
+            background: rgba(43, 108, 176, 0.15);
+            color: var(--accent-color);
+        }}
+        .academic-footnotes {{
+            margin-top: 32px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-color);
+            font-size: 0.88rem;
+            color: var(--muted-color);
+            line-height: 1.6;
+        }}
+        .academic-footnote {{
+            margin-bottom: 8px;
+            text-indent: 0;
+            text-align: left;
+            font-size: 0.88rem;
+            color: var(--muted-color);
+            padding: 6px 10px;
+            background: rgba(125, 125, 125, 0.03);
+            border-radius: 4px;
         }}
         .math-block {{
             text-align: center;
@@ -897,7 +1448,7 @@ class BookExporter:
         }}
         @media print {{
             body {{ padding: 0; background: #fff; color: #000; }}
-            .chapter-section {{ page-break-after: always; }}
+            .chapter-section {{ {page_break_css} }}
             .para-pair {{ background: transparent; border-left: 1px solid #ccc; }}
         }}
     </style>
@@ -908,7 +1459,7 @@ class BookExporter:
             <h1 class="book-title">{normalize_text(project.title)}</h1>
             <div class="book-author">Tác giả: {normalize_text(project.author)}</div>
             <div style="margin-top: 10px; color: var(--muted-color); font-size: 0.9em;">
-                {"Bản dịch Song Ngữ Anh - Việt" if bilingual else "Bản dịch Tiếng Việt (AI Literary Translation)"}
+                {sub_text_html}
             </div>
         </header>
         {"".join(chapters_html)}

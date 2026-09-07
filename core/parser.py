@@ -443,11 +443,11 @@ class BookParser:
             r'^(?:\d+\.)+\d+\s+([A-Z][\w\s\-/,\(\)]{2,})$'
         )
         FIG_CAPTION_PATTERN = re.compile(
-            r'^(?:Figure|Fig\.?)\s*([\d\.\-]+)[:\.]?\s*(.*)',
+            r'^(?:Figure|Fig\.?|Hình)\s*([\d\.\-]+)\s*[:\.\-–]\s*(.*)',
             re.IGNORECASE
         )
         TAB_CAPTION_PATTERN = re.compile(
-            r'^(?:Table|Bảng)\s*([\d\.\-]+)[:\.]?\s*(.*)',
+            r'^(?:Table|Bảng)\s*([\d\.\-]+)\s*[:\.\-–]\s*(.*)',
             re.IGNORECASE
         )
 
@@ -772,7 +772,7 @@ class BookParser:
                                 ))
                                 break
                         current_lines.append(line)
-                        flush_para(tag="h3")
+                        flush_para(tag="caption")
                         continue
 
                     m_fig = FIG_CAPTION_PATTERN.match(line)
@@ -791,7 +791,7 @@ class BookParser:
                                 image_path=figure_images.pop(fig_key)
                             ))
                         current_lines.append(line)
-                        flush_para(tag="p")
+                        flush_para(tag="caption")
                         continue
 
                     is_bullet = line.startswith(('•', '–', '- ', '* '))

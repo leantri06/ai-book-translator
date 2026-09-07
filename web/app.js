@@ -682,9 +682,12 @@ class BookTranslatorApp {
             return;
         }
 
-        const titleH2 = document.createElement('h2');
-        titleH2.textContent = this.currentChapter.title;
-        this.readerBody.appendChild(titleH2);
+        const isPreamble = ['phần mở đầu / tiêu đề', 'title', 'header'].includes((this.currentChapter.title || '').trim().toLowerCase());
+        if (!isPreamble) {
+            const titleH2 = document.createElement('h2');
+            titleH2.textContent = this.currentChapter.title;
+            this.readerBody.appendChild(titleH2);
+        }
 
         const translatedCount = this.currentChapter.paragraphs.filter(p => p.translated_text && p.translated_text.trim()).length;
         const isNotTranslated = translatedCount === 0;
@@ -700,26 +703,126 @@ class BookTranslatorApp {
             this.readerBody.appendChild(alertBox);
         }
 
-        for (const p of this.currentChapter.paragraphs) {
+        const isCaption = (p) => {
+            if (!p) return false;
+            if (p.tag === 'caption') return true;
+            const pat = /^(?:Figure|Fig\.?|Hình|Table|Bảng)\s*[\d\.\-]+[:\.\-–]/i;
+            return pat.test((p.original_text || '').trim()) || pat.test((p.translated_text || '').trim());
+        };
+
+        const splitCaption = (text) => {
+            const m = (text || '').trim().match(/^(Figure\s*[\d\.\-]+[:\.\-–]|Fig\.?\s*[\d\.\-]+[:\.\-–]|Hình\s*[\d\.\-]+[:\.\-–]|Table\s*[\d\.\-]+[:\.\-–]|Bảng\s*[\d\.\-]+[:\.\-–])\s*(.*)$/i);
+            if (m) return { label: m[1].trim(), content: m[2].trim() };
+            return { label: '', content: text };
+        };
+
+        const paras = this.currentChapter.paragraphs;
+        let pIdx = 0;
+
+        while (pIdx < paras.length) {
+            const p = paras[pIdx];
+
             // Image in Reader View
             if (p.tag === 'img' || p.image_path) {
                 const imgFilename = p.image_path ? p.image_path.split(/[\\/]/).pop() : '';
                 const imgSrc = imgFilename ? `/api/projects/${this.currentProjectId}/images/${imgFilename}` : '';
+                const nextP = (pIdx + 1 < paras.length) ? paras[pIdx + 1] : null;
+                const captionPara = isCaption(nextP) ? nextP : null;
+
                 if (imgSrc) {
-                    const fig = document.createElement('div');
-                    fig.className = 'reader-figure';
-                    fig.style.cssText = 'text-align: center; margin: 28px auto; max-width: 95%;';
-                    fig.innerHTML = `
-                        <img src="${imgSrc}" alt="${this.escapeHtml(p.original_text)}" style="max-width: 100%; max-height: 520px; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.35); display: inline-block;" />
-                        <div style="font-size: 13px; color: var(--text-muted); margin-top: 8px; font-style: italic;">${this.escapeHtml(p.original_text)}</div>
+                    const isTable = captionPara ? (/^(?:Table|Bảng)\b/i.test(captionPara.original_text) || /^(?:Table|Bảng)\b/i.test(captionPara.translated_text) || p.id.includes('tab')) : false;
+
+                    let capHtml = '';
+                    if (captionPara) {
+                        const enCap = (captionPara.original_text || '').trim();
+                        const viCap = (captionPara.translated_text || '').trim() || enCap;
+                        if (this.readerDisplayMode === 'bilingual') {
+                            const enObj = splitCaption(enCap);
+                            const viObj = splitCaption(viCap);
+                            capHtml = `
+                                <div class="caption-pair">
+                                    <div class="caption-en"><span class="cap-badge en">EN</span> <strong>${this.escapeHtml(enObj.label)}</strong> ${this.escapeHtml(enObj.content)}</div>
+                                    <div class="caption-vi"><span class="cap-badge vi">VI</span> <strong>${this.escapeHtml(viObj.label)}</strong> ${this.escapeHtml(viObj.content)}</div>
+                                </div>
+                            `;
+                        } else if (this.readerDisplayMode === 'en-only') {
+                            const enObj = splitCaption(enCap);
+                            capHtml = `<strong>${this.escapeHtml(enObj.label)}</strong> ${this.escapeHtml(enObj.content)}`;
+                        } else {
+                            const viObj = splitCaption(viCap);
+                            capHtml = `<strong>${this.escapeHtml(viObj.label)}</strong> ${this.escapeHtml(viObj.content)}`;
+                        }
+                    }
+
+                    const card = document.createElement('div');
+                    card.className = isTable ? 'academic-table-block' : 'academic-figure';
+
+                    const imgHtml = `
+                        <div class="${isTable ? 'table-image-wrapper' : 'figure-image-wrapper'}">
+                            <img src="${imgSrc}" alt="${this.escapeHtml(p.original_text)}" style="max-width: 100%; max-height: 540px; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.25);" />
+                        </div>
                     `;
-                    this.readerBody.appendChild(fig);
+
+                    if (isTable) {
+                        card.innerHTML = `${captionPara ? `<div class="table-caption">${capHtml}</div>` : ''}${imgHtml}`;
+                    } else {
+                        card.innerHTML = `${imgHtml}${captionPara ? `<div class="figure-caption">${capHtml}</div>` : ''}`;
+                    }
+
+                    this.readerBody.appendChild(card);
+                    pIdx += (captionPara ? 2 : 1);
+                    continue;
                 }
+            }
+
+            // Standalone caption
+            if (isCaption(p)) {
+                const enCap = (p.original_text || '').trim();
+                const viCap = (p.translated_text || '').trim() || enCap;
+                const cDiv = document.createElement('div');
+                cDiv.className = 'table-caption';
+                cDiv.style.margin = '16px auto';
+                if (this.readerDisplayMode === 'bilingual') {
+                    const enObj = splitCaption(enCap);
+                    const viObj = splitCaption(viCap);
+                    cDiv.innerHTML = `
+                        <div class="caption-pair">
+                            <div class="caption-en"><span class="cap-badge en">EN</span> <strong>${this.escapeHtml(enObj.label)}</strong> ${this.escapeHtml(enObj.content)}</div>
+                            <div class="caption-vi"><span class="cap-badge vi">VI</span> <strong>${this.escapeHtml(viObj.label)}</strong> ${this.escapeHtml(viObj.content)}</div>
+                        </div>
+                    `;
+                } else {
+                    const targetCap = this.readerDisplayMode === 'en-only' ? enCap : viCap;
+                    const obj = splitCaption(targetCap);
+                    cDiv.innerHTML = `<strong>${this.escapeHtml(obj.label)}</strong> ${this.escapeHtml(obj.content)}`;
+                }
+                this.readerBody.appendChild(cDiv);
+                pIdx += 1;
+                continue;
+            }
+
+            // Footnotes (∗, †, ‡, *)
+            const isFootnote = (p.original_text || '').trim().startsWith(('∗', '†', '‡', '*'));
+            if (isFootnote) {
+                const fnDiv = document.createElement('div');
+                fnDiv.className = 'academic-footnote';
+                const hasVi = p.translated_text && p.translated_text.trim();
+                if (this.readerDisplayMode === 'bilingual') {
+                    fnDiv.innerHTML = `
+                        <div style="color: var(--text-muted); font-size: 0.88em; font-style: italic; margin-bottom: 3px;">${this.escapeHtml(p.original_text)}</div>
+                        <div style="font-size: 0.95em;">${this.escapeHtml(p.translated_text || '')}</div>
+                    `;
+                } else if (this.readerDisplayMode === 'en-only') {
+                    fnDiv.textContent = p.original_text;
+                } else {
+                    fnDiv.textContent = hasVi ? p.translated_text : p.original_text;
+                }
+                this.readerBody.appendChild(fnDiv);
+                pIdx += 1;
                 continue;
             }
 
             const hasVi = p.translated_text && p.translated_text.trim();
-
             const isHeading = p.tag && ['h1', 'h2', 'h3', 'h4'].includes(p.tag);
 
             if (this.readerDisplayMode === 'bilingual') {
@@ -744,6 +847,8 @@ class BookTranslatorApp {
                 }
                 this.readerBody.appendChild(pEl);
             }
+
+            pIdx += 1;
         }
     }
 

@@ -623,11 +623,16 @@ body {
 }
 
 .reader-body h2 {
-    font-size: 1.8rem;
+    font-size: 1.65rem;
     color: var(--primary);
-    text-align: center;
-    margin-bottom: 30px;
+    text-align: left;
+    margin-top: 1.8em;
+    margin-bottom: 24px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--border-color);
     font-family: var(--font-ui);
+    letter-spacing: -0.01em;
+    font-weight: 700;
 }
 
 .reader-bilingual-pair {
@@ -669,17 +674,120 @@ body {
 }
 
 .reader-body h3 {
-    font-size: 1.35em;
+    font-size: 1.25em;
     font-weight: 700;
-    margin: 1.6em 0 0.8em;
-    color: var(--primary);
+    margin: 1.6em 0 0.6em;
+    color: var(--text-main);
+    text-align: left;
 }
 
 .reader-body h4 {
-    font-size: 1.15em;
+    font-size: 1.08em;
     font-weight: 600;
-    margin: 1.2em 0 0.5em;
+    margin: 1.2em 0 0.4em;
+    color: var(--text-muted);
+    text-align: left;
+}
+
+/* Reader Academic Figures & Tables */
+.reader-figure, .academic-figure {
+    margin: 32px auto;
+    text-align: center;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 18px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+    max-width: 100%;
+}
+
+.academic-table-block {
+    margin: 32px auto;
+    text-align: center;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 18px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+    max-width: 100%;
+}
+
+.figure-image-wrapper img, .table-image-wrapper img {
+    max-width: 98%;
+    height: auto;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.figure-caption, .table-caption {
+    margin-top: 14px;
+    font-size: 0.92rem;
+    line-height: 1.55;
     color: var(--text-main);
+    text-indent: 0;
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--bg-surface-elevated);
+    border-radius: var(--radius-sm);
+}
+
+.academic-table-block .table-caption {
+    margin-top: 0;
+    margin-bottom: 14px;
+}
+
+.caption-label {
+    font-weight: 700;
+    color: var(--primary);
+    margin-right: 6px;
+}
+
+.caption-pair {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.caption-en {
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.caption-vi {
+    font-size: 0.94rem;
+    color: var(--text-main);
+}
+
+.cap-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.cap-badge.en {
+    background: rgba(100, 116, 139, 0.2);
+    color: var(--text-muted);
+}
+
+.cap-badge.vi {
+    background: var(--primary-glow);
+    color: var(--primary);
+}
+
+.academic-footnote {
+    margin-bottom: 8px;
+    text-indent: 0;
+    text-align: left;
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    padding: 6px 12px;
+    background: var(--bg-surface-elevated);
+    border-radius: var(--radius-sm);
 }
 
 /* Sidebar Right (Pronouns & Glossary) */
