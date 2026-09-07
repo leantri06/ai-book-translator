@@ -151,9 +151,9 @@ body {
 .header-project {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 16px;
     flex: 1;
-    max-width: 600px;
+    max-width: 750px;
 }
 
 .project-selector-wrapper {
@@ -161,6 +161,19 @@ body {
     align-items: center;
     gap: 8px;
     flex: 1;
+    min-width: 0;
+}
+
+#projectSelect {
+    flex: 1;
+    min-width: 140px;
+    max-width: 280px;
+    text-overflow: ellipsis;
+}
+
+#btnNewBook, #btnDeleteProject {
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .global-progress-box {

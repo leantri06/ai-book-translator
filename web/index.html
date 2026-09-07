@@ -12,7 +12,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     
     <!-- Stylesheet -->
-    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/app.css?v=3.3.0">
 </head>
 <body class="dark-theme">
     <div id="app" class="app-layout">
@@ -38,7 +38,7 @@
                     <button id="btnNewBook" class="btn btn-outline btn-sm" title="Thêm sách mới">
                         <span class="btn-icon">➕</span> Tải sách mới
                     </button>
-                    <button id="btnDeleteProject" class="btn btn-outline-danger btn-sm" title="Xóa sách / paper này">
+                    <button id="btnDeleteProject" class="btn btn-outline-danger btn-sm" onclick="app && app.confirmDeleteProject ? app.confirmDeleteProject() : app.deleteCurrentProject()" title="Xóa sách / paper này">
                         <span class="btn-icon">🗑️</span> Xóa
                     </button>
                 </div>
@@ -424,11 +424,39 @@
                     </div>
                 </div>
             </div>
+        <!-- Delete Confirmation Modal -->
+        <div class="modal-backdrop hidden" id="deleteConfirmModal">
+            <div class="modal-card" style="max-width: 460px;">
+                <div class="modal-header">
+                    <h3>🗑️ Xác Nhận Xóa</h3>
+                    <button class="btn-close-modal" id="btnCloseDeleteModal">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p style="font-size: 13.5px; color: var(--text-main); margin-bottom: 8px;">
+                        Bạn có chắc chắn muốn xóa bài báo / cuốn sách này không?
+                    </p>
+                    <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px;">
+                        <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #f87171; font-weight: 700; display: block; margin-bottom: 4px;">Dự án đang chọn:</span>
+                        <strong id="deleteProjectTitleDisplay" style="color: #fca5a5; font-size: 14px; word-break: break-word; display: block;">Chưa chọn</strong>
+                    </div>
+                    <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin: 0;">
+                        ⚠️ Thao tác này sẽ dừng tiến trình dịch (nếu có) và xóa vĩnh viễn toàn bộ dữ liệu chương, bản dịch song ngữ và các hình ảnh trích xuất của bài này.
+                    </p>
+                    <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-color);">
+                        <button type="button" class="btn btn-outline" id="btnCancelDelete">
+                            Hủy bỏ
+                        </button>
+                        <button type="button" class="btn btn-outline-danger" id="btnConfirmDeleteAction" style="background: #ef4444; color: #fff; border-color: #dc2626;">
+                            🗑️ Xóa Vĩnh Viễn
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
 
     </div>
 
     <!-- Application Script -->
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=3.3.0"></script>
 </body>
 </html>

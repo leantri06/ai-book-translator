@@ -105,6 +105,13 @@ class BookTranslatorApp {
 
         this.exportModal = document.getElementById('exportModal');
         this.btnCloseExportModal = document.getElementById('btnCloseExportModal');
+
+        // Delete Modal
+        this.deleteConfirmModal = document.getElementById('deleteConfirmModal');
+        this.btnCloseDeleteModal = document.getElementById('btnCloseDeleteModal');
+        this.btnCancelDelete = document.getElementById('btnCancelDelete');
+        this.btnConfirmDeleteAction = document.getElementById('btnConfirmDeleteAction');
+        this.deleteProjectTitleDisplay = document.getElementById('deleteProjectTitleDisplay');
     }
 
     bindEvents() {
@@ -112,7 +119,19 @@ class BookTranslatorApp {
         this.projectSelect.addEventListener('change', (e) => this.selectProject(e.target.value));
         this.btnNewBook.addEventListener('click', () => this.showModal(this.uploadModal));
         if (this.btnDeleteProject) {
-            this.btnDeleteProject.addEventListener('click', () => this.deleteCurrentProject());
+            this.btnDeleteProject.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.confirmDeleteProject();
+            });
+        }
+        if (this.btnCloseDeleteModal) {
+            this.btnCloseDeleteModal.addEventListener('click', () => this.hideModal(this.deleteConfirmModal));
+        }
+        if (this.btnCancelDelete) {
+            this.btnCancelDelete.addEventListener('click', () => this.hideModal(this.deleteConfirmModal));
+        }
+        if (this.btnConfirmDeleteAction) {
+            this.btnConfirmDeleteAction.addEventListener('click', () => this.executeDeleteProject());
         }
 
         // Translation control buttons
@@ -353,15 +372,43 @@ class BookTranslatorApp {
 
     // --- PROJECTS MANAGEMENT ---
 
-    async deleteCurrentProject() {
-        if (!this.currentProjectId) {
-            alert('Vui lòng chọn một sách hoặc paper để xóa.');
+    confirmDeleteProject() {
+        const projId = this.currentProjectId || (this.projectSelect ? this.projectSelect.value : null);
+        if (!projId) {
+            alert('Vui lòng chọn một sách hoặc bài báo trong danh sách để xóa.');
             return;
         }
+        const projTitle = this.currentProject?.title || 
+            (this.projectSelect && this.projectSelect.selectedIndex >= 0 ? this.projectSelect.options[this.projectSelect.selectedIndex].text : 'Dự án đã chọn');
+        
+        if (this.deleteProjectTitleDisplay) {
+            this.deleteProjectTitleDisplay.textContent = projTitle;
+        }
+        if (this.deleteConfirmModal) {
+            this.showModal(this.deleteConfirmModal);
+        } else {
+            if (confirm(`Bạn có chắc chắn muốn xóa bài báo / sách:\n"${projTitle}"?\n\nToàn bộ dữ liệu sẽ bị xóa vĩnh viễn.`)) {
+                this.executeDeleteProject();
+            }
+        }
+    }
 
-        const projectTitle = this.currentProject ? this.currentProject.title : 'dự án này';
-        const confirmed = confirm(`Bạn có chắc chắn muốn xóa bài báo / sách:\n"${projectTitle}"?\n\nToàn bộ tiến trình dịch, dữ liệu và ảnh trích xuất sẽ bị xóa vĩnh viễn.`);
-        if (!confirmed) return;
+    deleteCurrentProject() {
+        this.confirmDeleteProject();
+    }
+
+    async executeDeleteProject() {
+        const projId = this.currentProjectId || (this.projectSelect ? this.projectSelect.value : null);
+        if (!projId) return;
+
+        const projTitle = this.currentProject?.title || 'dự án';
+        const confirmBtn = this.btnConfirmDeleteAction || document.getElementById('btnConfirmDeleteAction');
+        const origBtnText = confirmBtn ? confirmBtn.innerHTML : '';
+
+        if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = '⏳ Đang xóa...';
+        }
 
         try {
             if (this.pollTimer) {
@@ -369,7 +416,7 @@ class BookTranslatorApp {
                 this.pollTimer = null;
             }
 
-            const res = await fetch(`/api/projects/${this.currentProjectId}`, {
+            const res = await fetch(`/api/projects/${projId}`, {
                 method: 'DELETE'
             });
 
@@ -378,7 +425,11 @@ class BookTranslatorApp {
                 throw new Error(errData.detail || 'Không thể xóa dự án');
             }
 
-            this.appendLog('info', `Đã xóa thành công sách: "${projectTitle}".`);
+            this.appendLog('info', `Đã xóa thành công bài báo/sách: "${projTitle}".`);
+
+            if (this.deleteConfirmModal) {
+                this.hideModal(this.deleteConfirmModal);
+            }
             
             // Reset current state
             this.currentProjectId = null;
@@ -397,6 +448,11 @@ class BookTranslatorApp {
         } catch (e) {
             alert(`Lỗi khi xóa: ${e.message}`);
             this.appendLog('error', `Lỗi xóa dự án: ${e.message}`);
+        } finally {
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.innerHTML = origBtnText || '🗑️ Xóa Vĩnh Viễn';
+            }
         }
     }
 
@@ -1260,4 +1316,5 @@ class BookTranslatorApp {
 let app;
 window.addEventListener('DOMContentLoaded', () => {
     app = new BookTranslatorApp();
+    window.app = app;
 });
