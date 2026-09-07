@@ -25,6 +25,7 @@ class BookTranslatorApp {
         // Header
         this.projectSelect = document.getElementById('projectSelect');
         this.btnNewBook = document.getElementById('btnNewBook');
+        this.btnDeleteProject = document.getElementById('btnDeleteProject');
         this.projectTitleDisplay = document.getElementById('projectTitleDisplay');
         this.globalPercentDisplay = document.getElementById('globalPercentDisplay');
         this.globalProgressBar = document.getElementById('globalProgressBar');
@@ -110,6 +111,9 @@ class BookTranslatorApp {
         // Project selection
         this.projectSelect.addEventListener('change', (e) => this.selectProject(e.target.value));
         this.btnNewBook.addEventListener('click', () => this.showModal(this.uploadModal));
+        if (this.btnDeleteProject) {
+            this.btnDeleteProject.addEventListener('click', () => this.deleteCurrentProject());
+        }
 
         // Translation control buttons
         this.btnStartTranslate.addEventListener('click', () => this.startTranslation());
@@ -348,6 +352,53 @@ class BookTranslatorApp {
     }
 
     // --- PROJECTS MANAGEMENT ---
+
+    async deleteCurrentProject() {
+        if (!this.currentProjectId) {
+            alert('Vui lòng chọn một sách hoặc paper để xóa.');
+            return;
+        }
+
+        const projectTitle = this.currentProject ? this.currentProject.title : 'dự án này';
+        const confirmed = confirm(`Bạn có chắc chắn muốn xóa bài báo / sách:\n"${projectTitle}"?\n\nToàn bộ tiến trình dịch, dữ liệu và ảnh trích xuất sẽ bị xóa vĩnh viễn.`);
+        if (!confirmed) return;
+
+        try {
+            if (this.pollTimer) {
+                clearInterval(this.pollTimer);
+                this.pollTimer = null;
+            }
+
+            const res = await fetch(`/api/projects/${this.currentProjectId}`, {
+                method: 'DELETE'
+            });
+
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.detail || 'Không thể xóa dự án');
+            }
+
+            this.appendLog('info', `Đã xóa thành công sách: "${projectTitle}".`);
+            
+            // Reset current state
+            this.currentProjectId = null;
+            this.currentProject = null;
+            this.currentChapterId = null;
+            this.currentChapter = null;
+            this.projectTitleDisplay.textContent = 'Chưa chọn sách';
+            this.updateGlobalProgress(0);
+            this.chapterCountBadge.textContent = '0';
+            this.chaptersList.innerHTML = '<div class="empty-placeholder">Chưa chọn sách</div>';
+            this.studioParagraphs.innerHTML = '<div class="empty-placeholder">Chọn một chương để xem và chỉnh sửa bản dịch song ngữ</div>';
+            this.readerBody.innerHTML = '<div class="empty-placeholder">Nội dung chương sẽ hiển thị tại đây khi được chọn.</div>';
+
+            // Reload projects list
+            await this.loadProjects();
+        } catch (e) {
+            alert(`Lỗi khi xóa: ${e.message}`);
+            this.appendLog('error', `Lỗi xóa dự án: ${e.message}`);
+        }
+    }
 
     async loadProjects() {
         try {

@@ -889,6 +889,18 @@ body {
     border-color: rgba(255, 255, 255, 0.2);
 }
 
+.btn-outline-danger {
+    background: transparent;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #f87171;
+    cursor: pointer;
+}
+.btn-outline-danger:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: #ef4444;
+    color: #fca5a5;
+}
+
 .btn-icon-only {
     background: var(--bg-surface-elevated);
     border: 1px solid var(--border-color);

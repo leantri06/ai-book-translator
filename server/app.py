@@ -258,6 +258,15 @@ def delete_project(project_id: str):
     proj_dir = os.path.join(PROJECTS_DIR, project_id)
     if os.path.exists(proj_dir):
         shutil.rmtree(proj_dir, ignore_errors=True)
+    try:
+        if os.path.exists(UPLOADS_DIR):
+            for fname in os.listdir(UPLOADS_DIR):
+                if fname.startswith(f"{project_id}_"):
+                    fpath = os.path.join(UPLOADS_DIR, fname)
+                    if os.path.isfile(fpath):
+                        os.remove(fpath)
+    except Exception:
+        pass
     return {"status": "ok", "message": "Đã xóa dự án."}
 
 
