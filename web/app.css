@@ -650,6 +650,38 @@ body {
     font-size: 1.05em;
 }
 
+.reader-heading-pair {
+    border-left: 4px solid var(--accent);
+    background: rgba(99, 102, 241, 0.06);
+}
+
+.reader-heading-pair .heading-en {
+    font-weight: 600;
+    font-size: 1.05em;
+    font-style: normal;
+    color: var(--text-muted);
+}
+
+.reader-heading-pair .heading-vi {
+    font-weight: 700;
+    font-size: 1.2em;
+    color: var(--primary);
+}
+
+.reader-body h3 {
+    font-size: 1.35em;
+    font-weight: 700;
+    margin: 1.6em 0 0.8em;
+    color: var(--primary);
+}
+
+.reader-body h4 {
+    font-size: 1.15em;
+    font-weight: 600;
+    margin: 1.2em 0 0.5em;
+    color: var(--text-main);
+}
+
 /* Sidebar Right (Pronouns & Glossary) */
 .sidebar-right {
     width: 320px;

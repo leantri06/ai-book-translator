@@ -143,15 +143,26 @@ def format_math_for_epub(text: str, math_store: dict) -> tuple[str, bool]:
         nonlocal has_math
         has_math = True
         content = m.group(1).strip()
+        tag_m = re.search(r'\\tag\{(\d+)\}\s*$', content)
+        eq_num = ""
+        if tag_m:
+            eq_num = tag_m.group(1)
+            content = content[:tag_m.start()].strip()
         fn, img_bytes = render_latex_to_png(content, dpi=250)
         if fn and img_bytes:
             math_store[fn] = img_bytes
             safe_alt = html.escape(content, quote=True)
-            return f'<div class="math-block"><img src="images/{fn}" class="math-display-img" alt="{safe_alt}" /></div>'
+            formula_html = f'<img src="images/{fn}" class="math-display-img" alt="{safe_alt}" />'
         else:
-            return f'<div class="math-block">{unicode_math_fallback(content)}</div>'
+            formula_html = unicode_math_fallback(content)
+
+        if eq_num:
+            return f'<div class="math-block math-equation"><div class="math-formula">{formula_html}</div><div class="eq-num">({eq_num})</div></div>'
+        return f'<div class="math-block">{formula_html}</div>'
 
     text = re.sub(r'\$\$([^\$]+)\$\$', rep_display, text)
+    # Merge adjacent math-blocks into a single clean card
+    text = re.sub(r'</div>\s*<div class="math-block">', '<div style="margin-top: 8px;"></div>', text)
 
     # 3. Inline math $...$
     def rep_inline(m):
@@ -212,8 +223,20 @@ def format_math_in_html(text: str) -> tuple[str, bool]:
     def rep_display(m):
         nonlocal has_math
         has_math = True
-        return f'<div class="math-block">{latex_to_mathml(m.group(1), display=True)}</div>'
+        content = m.group(1).strip()
+        tag_m = re.search(r'\\tag\{(\d+)\}\s*$', content)
+        eq_num = ""
+        if tag_m:
+            eq_num = tag_m.group(1)
+            content = content[:tag_m.start()].strip()
+        mathml = latex_to_mathml(content, display=True)
+        if eq_num:
+            return f'<div class="math-block math-equation"><div class="math-formula">{mathml}</div><div class="eq-num">({eq_num})</div></div>'
+        return f'<div class="math-block">{mathml}</div>'
+
     text = re.sub(r'\$\$([^\$]+)\$\$', rep_display, text)
+    # Merge adjacent math-blocks into a single clean card
+    text = re.sub(r'</div>\s*<div class="math-block">', '<div style="margin-top: 8px;"></div>', text)
 
     # 3. Inline math $...$
     def rep_inline(m):
@@ -387,11 +410,24 @@ class BookExporter:
             text-rendering: optimizeLegibility;
             -webkit-font-smoothing: antialiased;
         }
-        h1, h2, h3 {
+        h1, h2, h3, h4 {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             color: #2b6cb0;
-            text-align: center;
             font-weight: 700;
+        }
+        h1, h2 {
+            text-align: center;
+        }
+        h3 {
+            font-size: 1.25em;
+            margin-top: 1.4em;
+            margin-bottom: 0.6em;
+        }
+        h4 {
+            font-size: 1.1em;
+            margin-top: 1.2em;
+            margin-bottom: 0.4em;
+            color: #2d3748;
         }
         p {
             text-indent: 1.5em;
@@ -520,7 +556,7 @@ class BookExporter:
                     html_parts.append(f'<div class="bilingual-en">{orig_html}</div>')
                     html_parts.append(f'<p class="bilingual-vi">{trans_html}</p>')
                 else:
-                    tag = p.tag if p.tag in ('h1', 'h2', 'h3', 'blockquote') else 'p'
+                    tag = p.tag if p.tag in ('h1', 'h2', 'h3', 'h4', 'blockquote') else 'p'
                     if trans_html.startswith('<div class="math-block'):
                         parts = trans_html.split('\n', 1)
                         if len(parts) == 2 and parts[1].strip():
@@ -686,7 +722,7 @@ class BookExporter:
                         <div class="vi">{trans_html}</div>
                     </div>''')
                 else:
-                    tag = p.tag if p.tag in ('h1', 'h2', 'h3', 'blockquote') else 'p'
+                    tag = p.tag if p.tag in ('h1', 'h2', 'h3', 'h4', 'blockquote') else 'p'
                     if trans_html.startswith('<div class="math-block'):
                         parts = trans_html.split('\n', 1)
                         if len(parts) == 2 and parts[1].strip():
@@ -771,6 +807,22 @@ class BookExporter:
             color: var(--accent-color);
             margin-bottom: 30px;
             text-align: center;
+        }}
+        h3 {{
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.35rem;
+            color: var(--text-color);
+            margin-top: 1.8em;
+            margin-bottom: 0.8em;
+            font-weight: 700;
+        }}
+        h4 {{
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 1.15rem;
+            color: var(--text-color);
+            margin-top: 1.4em;
+            margin-bottom: 0.5em;
+            font-weight: 600;
         }}
         p {{
             margin-bottom: 1.2em;

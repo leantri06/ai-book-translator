@@ -509,7 +509,7 @@ class BookParser:
             r'^(?:'
             r'(?:\d{1,2}\.?\s+[A-Z][\w\s\-/,\(\)]{2,})'
             r'|'
-            r'(?:Abstract|Conclusion|Conclusions|References|Bibliography|Acknowledgements|Appendix(?:\s+[A-Z0-9]+)?)'
+            r'(?:Abstract|Conclusion|Conclusions|References|Bibliography|Acknowledgements|Appendix(?:\s+[A-Z0-9]+)?|Attention Visualizations|Visualizations)'
             r'|'
             r'(?:(?:Chapter|Chương|Part|Phần|Section|Hồi|Mục)\s+([0-9ivxlc]+|[a-z]+)[:\s\.\-]*(.*))'
             r')$',
@@ -592,11 +592,23 @@ class BookParser:
                     union_r = matching_rects[0]
                     for r in matching_rects[1:]:
                         union_r = union_r | r
+
+                    # Include any text blocks directly above union_r (e.g. figure labels / sub-titles like "Scaled Dot-Product Attention")
+                    for b in blocks:
+                        if b[6] != 0:
+                            continue
+                        tb_r = pymupdf.Rect(b[:4])
+                        if tb_r.y1 <= union_r.y0 + 5 and tb_r.y0 >= union_r.y0 - 35:
+                            if tb_r.x1 > union_r.x0 - 50 and tb_r.x0 < union_r.x1 + 50:
+                                union_r = union_r | tb_r
+
+                    y0 = max(0, union_r.y0 - 8)
+                    y1 = min(cap_rect.y0 - 3, union_r.y1 + 4) if cap_rect.y0 > union_r.y1 else min(page.rect.height, union_r.y1 + 6)
                     bbox = pymupdf.Rect(
-                        max(0, union_r.x0 - 6),
-                        max(0, union_r.y0 - 6),
-                        min(page.rect.width, union_r.x1 + 6),
-                        min(page.rect.height, union_r.y1 + 6)
+                        max(0, union_r.x0 - 8),
+                        y0,
+                        min(page.rect.width, union_r.x1 + 8),
+                        y1
                     )
                     pix = page.get_pixmap(clip=bbox, dpi=250)
                     out_f = os.path.join(img_dir, f"p{page_num+1}_fig_{fig_id}.png")
@@ -610,6 +622,15 @@ class BookParser:
                         y0 = max(0, min(r.y0 for r in d_above) - 6)
                         x1 = min(page.rect.width, max(r.x1 for r in d_above) + 6)
                         y1 = min(page.rect.height, max(max(r.y1 for r in d_above) + 6, cap_rect.y0 - 4))
+                        # Prevent vector figure box from clipping a major heading sitting above it
+                        for b in blocks:
+                            if b[6] != 0:
+                                continue
+                            b_first = b[4].strip().splitlines()[0].strip() if b[4].strip() else ""
+                            if MAJOR_SINGLE_RE.match(b_first):
+                                h_rect = pymupdf.Rect(b[:4])
+                                if h_rect.y1 <= y0 + 15:
+                                    y0 = max(y0, h_rect.y1 + 4)
                         bbox = pymupdf.Rect(x0, y0, x1, y1)
                         pix = page.get_pixmap(clip=bbox, dpi=250)
                         out_f = os.path.join(img_dir, f"p{page_num+1}_fig_{fig_id}.png")
@@ -632,6 +653,9 @@ class BookParser:
                 # Skip bottom publication / equal contribution footnotes on page 0
                 if page_num == 0 and b[1] > page.rect.height - 120 and any(w in b[4].lower() for w in ('conference on', 'proceedings', 'equal contribution', 'nips')):
                     continue
+                # Skip axis tick token noise from attention heatmaps (<EOS>, <pad>)
+                if any(t in b[4] for t in ('<EOS>', '<pad>')) and not any(w in b[4] for w in ('Figure', 'Table', 'Visual')):
+                    continue
 
                 # Exclude block if inside table bbox
                 in_table = False
@@ -644,6 +668,17 @@ class BookParser:
                 if in_table:
                     continue
 
+                lines = [l.strip() for l in b[4].splitlines() if l.strip()]
+                if not lines:
+                    continue
+
+                # Check for major heading BEFORE figure exclusion to never lose top section titles
+                if MAJOR_SINGLE_RE.match(lines[0]) and len(lines[0]) < 75 and not lines[0].endswith(('.', ':', ';')):
+                    flush_chapter(lines[0])
+                    lines = lines[1:]
+                    if not lines:
+                        continue
+
                 # Exclude block if inside figure diagram (e.g. attention matrix tokens)
                 in_fig = False
                 for fb in fig_boxes:
@@ -651,10 +686,6 @@ class BookParser:
                         in_fig = True
                         break
                 if in_fig:
-                    continue
-
-                lines = [l.strip() for l in b[4].splitlines() if l.strip()]
-                if not lines:
                     continue
 
                 # Check for Heading at the start of the block
@@ -671,15 +702,17 @@ class BookParser:
                     lines = lines[2:]
                     if not lines:
                         continue
-                elif MAJOR_SINGLE_RE.match(lines[0]) and len(lines[0]) < 75 and not lines[0].endswith(('.', ':', ';')):
-                    flush_chapter(lines[0])
-                    lines = lines[1:]
-                    if not lines:
-                        continue
                 elif SUB_SINGLE_RE.match(lines[0]) and len(lines[0]) < 75 and not lines[0].endswith(('.', ':', ';')):
                     flush_para()
                     current_lines.append(lines[0])
                     flush_para(tag="h3")
+                    lines = lines[1:]
+                    if not lines:
+                        continue
+                elif re.match(r'^(?:Encoder|Decoder)[:\.]?$', lines[0]):
+                    flush_para()
+                    current_lines.append(lines[0])
+                    flush_para(tag="h4")
                     lines = lines[1:]
                     if not lines:
                         continue
@@ -734,7 +767,8 @@ class BookParser:
 
                     current_lines.append(line)
                     ends_sentence = line.endswith(('.', '!', '?', ':', '."'))
-                    if ends_sentence:
+                    ends_equation = bool(re.search(r'\(\d+\)$', line))
+                    if ends_sentence or ends_equation:
                         flush_para()
 
         flush_chapter("End")

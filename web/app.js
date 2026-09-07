@@ -720,21 +720,23 @@ class BookTranslatorApp {
 
             const hasVi = p.translated_text && p.translated_text.trim();
 
+            const isHeading = p.tag && ['h1', 'h2', 'h3', 'h4'].includes(p.tag);
+
             if (this.readerDisplayMode === 'bilingual') {
                 const pair = document.createElement('div');
-                pair.className = 'reader-bilingual-pair';
+                pair.className = isHeading ? 'reader-bilingual-pair reader-heading-pair' : 'reader-bilingual-pair';
                 pair.innerHTML = `
-                    <div class="reader-bilingual-en">${this.escapeHtml(p.original_text)}</div>
-                    <div class="reader-bilingual-vi">${hasVi ? this.escapeHtml(p.translated_text) : '<em style="color: var(--text-dim); font-size: 0.9em;">[Đoạn này chưa dịch]</em>'}</div>
+                    <div class="reader-bilingual-en ${isHeading ? 'heading-en' : ''}">${this.escapeHtml(p.original_text)}</div>
+                    <div class="reader-bilingual-vi ${isHeading ? 'heading-vi' : ''}">${hasVi ? this.escapeHtml(p.translated_text) : '<em style="color: var(--text-dim); font-size: 0.9em;">[Đoạn này chưa dịch]</em>'}</div>
                 `;
                 this.readerBody.appendChild(pair);
             } else if (this.readerDisplayMode === 'en-only') {
-                const pEl = document.createElement('p');
+                const pEl = document.createElement(isHeading ? p.tag : 'p');
                 pEl.textContent = p.original_text;
                 this.readerBody.appendChild(pEl);
             } else {
                 // vi-only
-                const pEl = document.createElement('p');
+                const pEl = document.createElement(isHeading ? p.tag : 'p');
                 if (hasVi) {
                     pEl.textContent = p.translated_text;
                 } else {
