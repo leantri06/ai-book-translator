@@ -504,32 +504,53 @@ class BookParser:
                 current_paras = []
             current_title = next_title
 
+        HEADING_NUM_RE = re.compile(r'^(\d{1,2}(?:\.\d{1,2})*)$')
+        MAJOR_SINGLE_RE = re.compile(
+            r'^(?:'
+            r'(?:\d{1,2}\.?\s+[A-Z][\w\s\-/,\(\)]{2,})'
+            r'|'
+            r'(?:Abstract|Conclusion|Conclusions|References|Bibliography|Acknowledgements|Appendix(?:\s+[A-Z0-9]+)?)'
+            r'|'
+            r'(?:(?:Chapter|Chương|Part|Phần|Section|Hồi|Mục)\s+([0-9ivxlc]+|[a-z]+)[:\s\.\-]*(.*))'
+            r')$',
+            re.IGNORECASE
+        )
+        SUB_SINGLE_RE = re.compile(
+            r'^(?:\d+\.)+\d+\s+([A-Z][\w\s\-/,\(\)]{2,})$'
+        )
+
         for page_num, page in enumerate(doc):
-            # 1. Detect and render Tables
-            tabs = page.find_tables()
-            table_records = []
-            table_rects = []
             drawings = page.get_drawings()
             blocks = page.get_text("blocks")
 
-            if tabs.tables:
-                for t_idx, tab in enumerate(tabs.tables):
-                    t_rect = pymupdf.Rect(tab.bbox)
-                    if t_rect.width > 60 and t_rect.height > 30:
-                        img_name = f"p{page_num + 1}_tab_{t_idx + 1}.png"
-                        img_path = os.path.join(img_dir, img_name)
-                        pix = page.get_pixmap(clip=t_rect, dpi=250)
-                        pix.save(img_path)
-                        table_records.append({"rect": t_rect, "img_path": img_path, "consumed": False})
-                        table_rects.append(t_rect)
-
-            # Check if any Table captions exist without detected table rect (e.g. borderless tables)
+            # 1. Detect and render Tables ONLY if page contains a Table caption
+            page_tab_captions = []
             for b in blocks:
                 if b[6] != 0:
                     continue
                 t_first = b[4].strip().splitlines()[0].strip() if b[4].strip() else ""
-                if TAB_CAPTION_PATTERN.match(t_first):
-                    cap_r = pymupdf.Rect(b[:4])
+                m_tab = TAB_CAPTION_PATTERN.match(t_first)
+                if m_tab:
+                    page_tab_captions.append((pymupdf.Rect(b[:4]), t_first, m_tab.group(1)))
+
+            table_records = []
+            table_rects = []
+            if page_tab_captions:
+                tabs = page.find_tables()
+                if tabs.tables:
+                    for t_idx, tab in enumerate(tabs.tables):
+                        t_rect = pymupdf.Rect(tab.bbox)
+                        if t_rect.width > 60 and t_rect.height > 30:
+                            if any(abs(t_rect.y0 - cap_r.y1) < 140 or abs(cap_r.y0 - t_rect.y1) < 140 for cap_r, _, _ in page_tab_captions):
+                                img_name = f"p{page_num + 1}_tab_{t_idx + 1}.png"
+                                img_path = os.path.join(img_dir, img_name)
+                                pix = page.get_pixmap(clip=t_rect, dpi=250)
+                                pix.save(img_path)
+                                table_records.append({"rect": t_rect, "img_path": img_path, "consumed": False})
+                                table_rects.append(t_rect)
+
+                # Fallback for borderless tables under table caption
+                for cap_r, cap_txt, tab_id in page_tab_captions:
                     if not any(cap_r.intersects(tr) or abs(tr.y0 - cap_r.y1) < 40 for tr in table_rects):
                         d_below = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= cap_r.y1 + 450]
                         if len(d_below) >= 2:
@@ -545,7 +566,7 @@ class BookParser:
                             table_records.append({"rect": derived_rect, "img_path": img_path, "consumed": False})
                             table_rects.append(derived_rect)
 
-            # 2. Extract Figures (Raster images, vector diagrams, and Form XObjects)
+            # 2. Extract Figures (Raster images and vector diagrams)
             raster_imgs = page.get_images()
             page_fig_captions = []
             for b in blocks:
@@ -557,68 +578,60 @@ class BookParser:
                     page_fig_captions.append((pymupdf.Rect(b[:4]), first_line, m_fig.group(1)))
 
             figure_images = {}
-            consumed_xrefs = set()
             fig_boxes = []
 
             for cap_rect, cap_text, fig_id in page_fig_captions:
-                matched_raster = False
+                matching_rects = []
                 for img_info in raster_imgs:
                     xref = img_info[0]
-                    if xref in consumed_xrefs:
-                        continue
-                    img_rects = page.get_image_rects(xref)
-                    for ir in img_rects:
-                        if abs(ir.y1 - cap_rect.y0) < 250 or abs(ir.y0 - cap_rect.y1) < 250:
-                            base = doc.extract_image(xref)
-                            out_f = os.path.join(img_dir, f"p{page_num+1}_fig_{fig_id}.png")
-                            with open(out_f, "wb") as f:
-                                f.write(base["image"])
-                            figure_images[fig_id] = out_f
-                            consumed_xrefs.add(xref)
-                            fig_boxes.append(ir)
-                            matched_raster = True
-                            break
-                    if matched_raster:
-                        break
+                    for ir in page.get_image_rects(xref):
+                        if ir.y1 <= cap_rect.y0 + 10 and ir.y0 >= max(0, cap_rect.y0 - 550):
+                            matching_rects.append(ir)
 
-                if not matched_raster:
-                    rel_drawings = [
-                        d for d in drawings
-                        if (d["rect"].y1 <= cap_rect.y0 + 10 and d["rect"].y0 >= max(0, cap_rect.y0 - 450))
-                    ]
-                    if len(rel_drawings) >= 5:
-                        x0 = max(0, min(d['rect'].x0 for d in rel_drawings) - 6)
-                        y0 = max(0, min(d['rect'].y0 for d in rel_drawings) - 6)
-                        x1 = min(page.rect.width, max(d['rect'].x1 for d in rel_drawings) + 6)
-                        y1 = min(page.rect.height, max(d['rect'].y1 for d in rel_drawings) + 6)
+                if matching_rects:
+                    union_r = matching_rects[0]
+                    for r in matching_rects[1:]:
+                        union_r = union_r | r
+                    bbox = pymupdf.Rect(
+                        max(0, union_r.x0 - 6),
+                        max(0, union_r.y0 - 6),
+                        min(page.rect.width, union_r.x1 + 6),
+                        min(page.rect.height, union_r.y1 + 6)
+                    )
+                    pix = page.get_pixmap(clip=bbox, dpi=250)
+                    out_f = os.path.join(img_dir, f"p{page_num+1}_fig_{fig_id}.png")
+                    pix.save(out_f)
+                    figure_images[fig_id] = out_f
+                    fig_boxes.append(bbox)
+                else:
+                    d_above = [d['rect'] for d in drawings if d['rect'].y1 <= cap_rect.y0 + 5 and d['rect'].y0 >= max(0, cap_rect.y0 - 550)]
+                    if len(d_above) >= 5:
+                        x0 = max(0, min(r.x0 for r in d_above) - 6)
+                        y0 = max(0, min(r.y0 for r in d_above) - 6)
+                        x1 = min(page.rect.width, max(r.x1 for r in d_above) + 6)
+                        y1 = min(page.rect.height, max(max(r.y1 for r in d_above) + 6, cap_rect.y0 - 4))
                         bbox = pymupdf.Rect(x0, y0, x1, y1)
-                        pix = page.get_pixmap(clip=bbox, dpi=200)
+                        pix = page.get_pixmap(clip=bbox, dpi=250)
                         out_f = os.path.join(img_dir, f"p{page_num+1}_fig_{fig_id}.png")
                         pix.save(out_f)
                         figure_images[fig_id] = out_f
                         fig_boxes.append(bbox)
-
-            # Standalone images
-            standalone_imgs = []
-            for img_idx, img_info in enumerate(raster_imgs):
-                xref = img_info[0]
-                if xref in consumed_xrefs:
-                    continue
-                try:
-                    base = doc.extract_image(xref)
-                    if base.get("width", 0) > 80 and base.get("height", 0) > 80:
-                        out_f = os.path.join(img_dir, f"p{page_num+1}_img_{img_idx+1}.png")
-                        with open(out_f, "wb") as f:
-                            f.write(base["image"])
-                        standalone_imgs.append(out_f)
-                except Exception:
-                    pass
 
             # 3. Process text blocks with table & figure content filtering
             for b in blocks:
                 if b[6] != 0:
                     continue
                 b_rect = pymupdf.Rect(b[:4])
+
+                # Skip vertical margin watermarks (e.g. arXiv timestamp on left margin)
+                if b[0] < 45 and (b[3] - b[1] > 120 or 'arxiv:' in b[4].lower()):
+                    continue
+                # Skip page numbers at bottom
+                if b[1] > page.rect.height - 60 and re.match(r'^\s*\d{1,3}\s*$', b[4]):
+                    continue
+                # Skip bottom publication / equal contribution footnotes on page 0
+                if page_num == 0 and b[1] > page.rect.height - 120 and any(w in b[4].lower() for w in ('conference on', 'proceedings', 'equal contribution', 'nips')):
+                    continue
 
                 # Exclude block if inside table bbox
                 in_table = False
@@ -631,14 +644,12 @@ class BookParser:
                 if in_table:
                     continue
 
-                # Exclude block if inside vector figure diagram
+                # Exclude block if inside figure diagram (e.g. attention matrix tokens)
                 in_fig = False
                 for fb in fig_boxes:
                     if b_rect.intersects(fb):
-                        inter = b_rect & fb
-                        if inter.get_area() > 0.5 * b_rect.get_area():
-                            in_fig = True
-                            break
+                        in_fig = True
+                        break
                 if in_fig:
                     continue
 
@@ -646,19 +657,34 @@ class BookParser:
                 if not lines:
                     continue
 
-                for l_idx, line in enumerate(lines):
-                    m_major = MAJOR_HEADING_PATTERN.match(line)
-                    if m_major and len(line) < 75 and not line.endswith(('.', ',', ';')):
-                        flush_chapter(line)
-                        continue
-
-                    m_sub = SUB_HEADING_PATTERN.match(line)
-                    if m_sub and len(line) < 75 and not line.endswith(('.', ',', ';')):
+                # Check for Heading at the start of the block
+                m_num = HEADING_NUM_RE.match(lines[0])
+                if m_num and len(lines) >= 2 and lines[1][0].isupper() and len(lines[1]) < 65:
+                    num_str = m_num.group(1)
+                    heading = f"{num_str} {lines[1]}"
+                    if '.' not in num_str:
+                        flush_chapter(heading)
+                    else:
                         flush_para()
-                        current_lines.append(line)
+                        current_lines.append(heading)
                         flush_para(tag="h3")
+                    lines = lines[2:]
+                    if not lines:
+                        continue
+                elif MAJOR_SINGLE_RE.match(lines[0]) and len(lines[0]) < 75 and not lines[0].endswith(('.', ':', ';')):
+                    flush_chapter(lines[0])
+                    lines = lines[1:]
+                    if not lines:
+                        continue
+                elif SUB_SINGLE_RE.match(lines[0]) and len(lines[0]) < 75 and not lines[0].endswith(('.', ':', ';')):
+                    flush_para()
+                    current_lines.append(lines[0])
+                    flush_para(tag="h3")
+                    lines = lines[1:]
+                    if not lines:
                         continue
 
+                for l_idx, line in enumerate(lines):
                     m_tab = TAB_CAPTION_PATTERN.match(line)
                     if m_tab:
                         flush_para()
@@ -710,49 +736,6 @@ class BookParser:
                     ends_sentence = line.endswith(('.', '!', '?', ':', '."'))
                     if ends_sentence:
                         flush_para()
-
-            # End of page: check remaining unconsumed tables/figures/images
-            for t in table_records:
-                if not t["consumed"]:
-                    flush_para()
-                    p_global_idx += 1
-                    current_paras.append(BookParagraph(
-                        id=f"c{chap_idx}_tab{p_global_idx}",
-                        original_text=f"[Bảng trang {page_num + 1}]",
-                        translated_text=f"[Bảng trang {page_num + 1}]",
-                        status="done",
-                        tag="img",
-                        index=p_global_idx,
-                        image_path=t["img_path"]
-                    ))
-                    t["consumed"] = True
-
-            for fig_key, f_path in list(figure_images.items()):
-                flush_para()
-                p_global_idx += 1
-                current_paras.append(BookParagraph(
-                    id=f"c{chap_idx}_fig{p_global_idx}",
-                    original_text=f"[Hình {fig_key}]",
-                    translated_text=f"[Hình {fig_key}]",
-                    status="done",
-                    tag="img",
-                    index=p_global_idx,
-                    image_path=f_path
-                ))
-            figure_images.clear()
-
-            for s_img in standalone_imgs:
-                flush_para()
-                p_global_idx += 1
-                current_paras.append(BookParagraph(
-                    id=f"c{chap_idx}_img{p_global_idx}",
-                    original_text=f"[Minh họa trang {page_num + 1}]",
-                    translated_text=f"[Minh họa trang {page_num + 1}]",
-                    status="done",
-                    tag="img",
-                    index=p_global_idx,
-                    image_path=s_img
-                ))
 
         flush_chapter("End")
 
