@@ -65,6 +65,11 @@ class CheckQuotaModel(BaseModel):
     base_url: str = ""
 
 
+class ProjectMetaUpdateModel(BaseModel):
+    title: Optional[str] = None
+    author: Optional[str] = None
+
+
 # --- API Routes ---
 
 @app.get("/api/settings")
@@ -250,6 +255,23 @@ def get_project_details(project_id: str):
         "chapters": chapters_summary,
         "is_translating": worker_instance.is_running(project_id)
     }
+
+
+@app.put("/api/projects/{project_id}/meta")
+def update_project_metadata(project_id: str, data: ProjectMetaUpdateModel):
+    proj_dir = os.path.join(PROJECTS_DIR, project_id)
+    meta_file = os.path.join(proj_dir, "meta.json")
+    if not os.path.exists(meta_file):
+        raise HTTPException(status_code=404, detail="Không tìm thấy dự án")
+    with open(meta_file, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    if data.title is not None and data.title.strip():
+        meta["title"] = data.title.strip()
+    if data.author is not None:
+        meta["author"] = data.author.strip()
+    with open(meta_file, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    return {"status": "ok", "message": "Đã cập nhật thông tin dự án.", "title": meta["title"], "author": meta["author"]}
 
 
 @app.delete("/api/projects/{project_id}")

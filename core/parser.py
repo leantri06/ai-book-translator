@@ -261,24 +261,169 @@ class BookParser:
         return BookParser._parse_pdf_pypdf(file_path, project_id)
 
     @staticmethod
-    def _parse_pdf_mupdf(file_path: str, project_id: str) -> BookProject:
-        doc = pymupdf.open(file_path)
+    def _extract_pdf_title_and_author(doc, file_path: str) -> Tuple[str, str]:
         raw_name = os.path.splitext(os.path.basename(file_path))[0]
         clean_name = re.sub(r'^[0-9a-f]{8}_', '', raw_name)
-        meta = doc.metadata or {}
-        title = meta.get("title", "").strip() if meta.get("title") else clean_name
-        author = meta.get("author", "").strip() if meta.get("author") else "Tác giả không rõ"
+        clean_name = clean_name.replace('_', ' ').strip()
+        if len(doc) == 0:
+            return clean_name, "Tác giả không rõ"
 
-        if len(doc) > 0:
-            p0_text = doc[0].get_text() or ""
-            f_lines = [l.strip() for l in p0_text.splitlines() if l.strip()]
-            for l in f_lines[:8]:
-                if any(w in l.lower() for w in ("arxiv", "permission", "attribution", "doi", "issn", "ieee")):
-                    continue
-                if 10 < len(l) < 90 and not l.endswith(('.', ':', ';', '@')):
-                    if title == clean_name or title == "Tác giả không rõ":
-                        title = l
+        meta = doc.metadata or {}
+        meta_title = (meta.get("title") or "").strip()
+        meta_author = (meta.get("author") or "").strip()
+
+        invalid_titles = {'untitled', 'latex', 'tex', 'document', 'manuscript', 'draft', 'none', 'arxiv', 'unknown', 'default'}
+        title = meta_title if (meta_title and not any(inv in meta_title.lower() for inv in invalid_titles) and len(meta_title) > 4) else ''
+        invalid_authors = {'unknown', 'author', 'tex', 'latex', 'none', 'anonymous', 'user', 'admin'}
+        author = meta_author if (meta_author and not any(inv in meta_author.lower() for inv in invalid_authors) and len(meta_author) > 2) else ''
+
+        page = doc[0]
+        pw, ph = page.rect.width, page.rect.height
+        d = page.get_text("dict")
+        spans = []
+        for b in d.get("blocks", []):
+            if b.get("type") != 0:
+                continue
+            for l in b.get("lines", []):
+                for s in l.get("spans", []):
+                    txt = s.get("text", "").strip()
+                    if not txt:
+                        continue
+                    bbox = s.get("bbox", (0, 0, 0, 0))
+                    # Skip margin stamps / watermarks
+                    if bbox[0] < 35 and bbox[1] > ph * 0.25:
+                        continue
+                    if bbox[1] < 30 or bbox[3] > ph - 30:
+                        continue
+                    if "arxiv:" in txt.lower():
+                        continue
+                    spans.append({
+                        "text": txt,
+                        "size": round(s.get("size", 10.0), 1),
+                        "flags": s.get("flags", 0),
+                        "font": s.get("font", ""),
+                        "bbox": bbox,
+                        "y0": bbox[1],
+                        "y1": bbox[3],
+                        "x0": bbox[0],
+                        "x1": bbox[2]
+                    })
+
+        # 1. EXTRACT TITLE
+        top_spans = [s for s in spans if s["y0"] < ph * 0.40]
+        if top_spans:
+            valid_top_spans = [
+                s for s in top_spans
+                if not any(w in s["text"].lower() for w in ('permission', 'attribution', 'copyright', 'license', 'journalistic', 'reproduce the tables'))
+            ]
+            if valid_top_spans:
+                max_size = max(s["size"] for s in valid_top_spans)
+                title_spans = [s for s in valid_top_spans if s["size"] >= max_size - 1.5 and len(s["text"]) > 1]
+                title_spans.sort(key=lambda s: (round(s["y0"] / 6) * 6, s["x0"]))
+                extracted_title = " ".join(s["text"] for s in title_spans).strip()
+                extracted_title = re.sub(r'(\w+)-\s+(\w+)', r'\1\2', extracted_title)
+                extracted_title = re.sub(r'\s+', ' ', extracted_title).strip()
+                if len(extracted_title) >= 4:
+                    title = extracted_title
+
+        # 2. EXTRACT AUTHORS
+        if not author:
+            title_bottom = 0
+            if title and top_spans:
+                for s in top_spans:
+                    if s["text"] in title:
+                        title_bottom = max(title_bottom, s["y1"])
+
+            abstract_top = ph * 0.75
+            for s in spans:
+                if re.match(r'^(abstract|tóm tắt)\b', s["text"], re.IGNORECASE):
+                    abstract_top = min(abstract_top, s["y0"])
                     break
+
+            if title_bottom > 0 and title_bottom < abstract_top:
+                AFFIL_KEYWORDS = {
+                    'university', 'institute', 'department', 'research', 'laborator', 'college',
+                    'school', 'center', 'centre', 'campus', 'brain', 'technolog', 'corporation',
+                    'inc.', 'ltd', 'dept', 'faculty', 'academy', 'group', 'team', 'sciences',
+                    'mary', 'williamsburg', 'virginia', 'google', 'toronto'
+                }
+                LOCATION_KEYWORDS = {
+                    'usa', 'vietnam', 'china', 'france', 'germany', 'japan', 'canada',
+                    'united states', 'london', 'paris', 'california', 'new york', 'massachusetts',
+                    'rio de janeiro', 'brazil', 'beijing', 'tokyo', 'singapore', 'korea', 'australia'
+                }
+
+                authors_found = []
+                seen_names = set()
+
+                for b in d.get("blocks", []):
+                    if b.get("type") != 0:
+                        continue
+                    by0, by1 = b["bbox"][1], b["bbox"][3]
+                    if by1 < title_bottom - 5 or by0 > abstract_top + 5:
+                        continue
+                    if b["bbox"][0] < 35:
+                        continue
+
+                    cur_name_parts = []
+                    cur_font_size = None
+
+                    for l in b.get("lines", []):
+                        line_text = " ".join(s.get("text", "") for s in l.get("spans", [])).strip()
+                        if not line_text:
+                            continue
+                        f_size = round(l["spans"][0].get("size", 10.0), 1)
+
+                        cleaned_line = re.sub(r'[\*†‡§0-9#\(\)]+', '', line_text).strip()
+                        lower_l = cleaned_line.lower()
+
+                        if "@" in lower_l or "http" in lower_l or any(w in lower_l for w in AFFIL_KEYWORDS) or any(w in lower_l for w in LOCATION_KEYWORDS):
+                            if cur_name_parts:
+                                full_n = " ".join(cur_name_parts).strip()
+                                for p in re.split(r'[,;]|\sand\s', full_n):
+                                    name = re.sub(r'[\*\u2217†‡§0-9#\(\)]+', '', p).strip()
+                                    words = name.split()
+                                    if 2 <= len(words) <= 4 and all(w[0].isupper() for w in words if len(w) > 1):
+                                        if name not in seen_names and not any(w in name.lower() for w in AFFIL_KEYWORDS):
+                                            seen_names.add(name)
+                                            authors_found.append(name)
+                                cur_name_parts = []
+                                cur_font_size = None
+                            continue
+
+                        if cur_font_size is not None and f_size < cur_font_size - 1.0:
+                            break
+
+                        cur_font_size = f_size
+                        cur_name_parts.append(cleaned_line)
+
+                    if cur_name_parts:
+                        full_n = " ".join(cur_name_parts).strip()
+                        for p in re.split(r'[,;]|\sand\s', full_n):
+                            name = re.sub(r'[\*\u2217†‡§0-9#\(\)]+', '', p).strip()
+                            words = name.split()
+                            if 2 <= len(words) <= 4 and all(w[0].isupper() for w in words if len(w) > 1):
+                                if name not in seen_names and not any(w in name.lower() for w in AFFIL_KEYWORDS):
+                                    seen_names.add(name)
+                                    authors_found.append(name)
+
+                if authors_found:
+                    if len(authors_found) > 6:
+                        author = ", ".join(authors_found[:5]) + f", và {len(authors_found)-5} tác giả khác"
+                    else:
+                        author = ", ".join(authors_found)
+
+        if not title:
+            title = clean_name
+        if not author:
+            author = "Tác giả không rõ"
+
+        return title, author
+
+    @staticmethod
+    def _parse_pdf_mupdf(file_path: str, project_id: str) -> BookProject:
+        doc = pymupdf.open(file_path)
+        title, author = BookParser._extract_pdf_title_and_author(doc, file_path)
 
         data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
         img_dir = os.path.join(data_dir, "projects", project_id, "images")
@@ -328,6 +473,14 @@ class BookParser:
                     text = (text + " " + l).strip() if text else l
             current_lines = []
             if len(text) >= 2:
+                if chap_idx == 0 and any(p in text.lower() for p in (
+                    "proper attribution is provided",
+                    "permission to make digital or hard copies",
+                    "reproduce the tables and figures in this paper solely for use in journalistic",
+                    "this work is licensed under a creative commons",
+                    "copyright held by the owner/author",
+                )):
+                    return
                 p_global_idx += 1
                 current_paras.append(BookParagraph(
                     id=f"c{chap_idx}_p{p_global_idx}",
