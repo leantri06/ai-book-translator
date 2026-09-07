@@ -559,11 +559,32 @@ class BookParser:
 
                         # Restrict drawings by column to avoid swallowing adjacent column text in 2-column papers
                         if cap_r.x0 > pw * 0.45:
-                            d_below = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= y_max and d['rect'].x0 >= pw * 0.45]
+                            candidates = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= y_max and d['rect'].x0 >= pw * 0.45]
                         elif cap_r.x1 < pw * 0.55:
-                            d_below = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= y_max and d['rect'].x1 <= pw * 0.55]
+                            candidates = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= y_max and d['rect'].x1 <= pw * 0.55]
                         else:
-                            d_below = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= y_max]
+                            candidates = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= y_max]
+
+                        # Filter candidates: Table rules are stroke lines, not tall filled callout boxes (height > 15 with fill)
+                        line_drawings = []
+                        for d in candidates:
+                            r = d['rect']
+                            is_fill = d.get('fill') is not None
+                            if is_fill and r.height > 15:
+                                continue
+                            line_drawings.append(d)
+
+                        line_drawings.sort(key=lambda d: d['rect'].y0)
+
+                        # Cluster drawings with vertical continuity from caption (gap < 60 pt)
+                        d_below = []
+                        cur_y1 = cap_r.y1
+                        for d in line_drawings:
+                            dr = d['rect']
+                            if dr.y0 - cur_y1 > 60:
+                                break
+                            d_below.append(d)
+                            cur_y1 = max(cur_y1, dr.y1)
 
                         if len(d_below) >= 2:
                             x0 = max(0, min(d['rect'].x0 for d in d_below) - 6)
@@ -658,6 +679,9 @@ class BookParser:
 
                 # Skip vertical margin watermarks (e.g. arXiv timestamp on left margin)
                 if b[0] < 45 and (b[3] - b[1] > 120 or 'arxiv:' in b[4].lower()):
+                    continue
+                # Skip running headers at the top of pages > 0
+                if page_num > 0 and b[1] < 72 and (b[3] - b[1] < 20):
                     continue
                 # Skip page numbers at bottom
                 if b[1] > page.rect.height - 60 and re.match(r'^\s*\d{1,3}\s*$', b[4]):
