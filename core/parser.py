@@ -552,7 +552,19 @@ class BookParser:
                 # Fallback for borderless tables under table caption
                 for cap_r, cap_txt, tab_id in page_tab_captions:
                     if not any(cap_r.intersects(tr) or abs(tr.y0 - cap_r.y1) < 40 for tr in table_rects):
-                        d_below = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= cap_r.y1 + 450]
+                        pw = page.rect.width
+                        # Restrict y1 so it does not extend beyond another caption below in the same column
+                        next_caps = [c[0] for c in page_tab_captions if c[0].y0 > cap_r.y1 and abs(c[0].x0 - cap_r.x0) < 120]
+                        y_max = next_caps[0].y0 - 2 if next_caps else cap_r.y1 + 450
+
+                        # Restrict drawings by column to avoid swallowing adjacent column text in 2-column papers
+                        if cap_r.x0 > pw * 0.45:
+                            d_below = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= y_max and d['rect'].x0 >= pw * 0.45]
+                        elif cap_r.x1 < pw * 0.55:
+                            d_below = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= y_max and d['rect'].x1 <= pw * 0.55]
+                        else:
+                            d_below = [d for d in drawings if d['rect'].y0 >= cap_r.y1 - 5 and d['rect'].y1 <= y_max]
+
                         if len(d_below) >= 2:
                             x0 = max(0, min(d['rect'].x0 for d in d_below) - 6)
                             y0 = max(0, min(d['rect'].y0 for d in d_below) - 4)
