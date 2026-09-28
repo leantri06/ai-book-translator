@@ -107,7 +107,7 @@ class TranslationWorker:
         """Returns the current state and any new logs/paragraph updates since timestamp."""
         with self._lock:
             state = self._project_states.get(project_id)
-            is_running = bool(project_id in self._active_jobs and self._active_jobs[project_id]["status"] == "running")
+            is_running = self.is_running(project_id)
 
             if not state:
                 return {
@@ -152,7 +152,7 @@ class TranslationWorker:
     def is_running(self, project_id: str) -> bool:
         with self._lock:
             job = self._active_jobs.get(project_id)
-            return bool(job and job["status"] == "running")
+            return bool(job and job["status"] in ("running", "stopping"))
 
     def stop_translation(self, project_id: str) -> None:
         with self._lock:
@@ -431,6 +431,8 @@ class TranslationWorker:
                     with chunk_lock:
                         if len(completed_chunks) >= total_chunks:
                             break
+                    if not any(thread.is_alive() for thread in threads):
+                        break
                     if not key_pool.has_available_keys():
                         break
                     time.sleep(0.5)
@@ -444,13 +446,17 @@ class TranslationWorker:
                             break
 
                 for t in threads:
-                    t.join(timeout=3.0)
+                    t.join()
 
-                if not stop_event.is_set() and len(completed_chunks) >= total_chunks:
+                if not stop_event.is_set() and chap.progress_percent >= 100.0:
                     self.add_log(project_id, "success", f"Hoàn thành chương: {chap.title} ({chap.progress_percent}%)")
 
             if not stop_event.is_set():
-                self.add_log(project_id, "success", "Tất cả các chương yêu cầu đã được dịch xong!")
+                remaining = sum(chapter.total_paragraphs - chapter.translated_paragraphs for chapter in chapters_to_process)
+                if remaining:
+                    self.add_log(project_id, "warning", f"Còn {remaining} đoạn chưa dịch xong. Hãy kiểm tra log và tiếp tục dịch.")
+                else:
+                    self.add_log(project_id, "success", "Tất cả các chương yêu cầu đã được dịch xong!")
 
         except Exception as e:
             logger.exception("Fatal in translation loop")

@@ -664,6 +664,10 @@ class BookTranslatorApp {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ translated_text: newText })
             });
+            if (!res.ok) {
+                const error = await res.json();
+                throw new Error(error.detail || 'Không thể lưu bản dịch');
+            }
             if (res.ok) {
                 const chip = rowEl.querySelector('.para-status-chip');
                 chip.className = 'para-status-chip chip-edited';

@@ -110,7 +110,7 @@ class BookParser:
             return BookParser.parse_epub(file_path, pid)
         elif ext == ".pdf":
             return BookParser.parse_pdf(file_path, pid)
-        elif ext in (".docx", ".doc"):
+        elif ext == ".docx":
             return BookParser.parse_docx(file_path, pid)
         elif ext in (".txt", ".md"):
             return BookParser.parse_text(file_path, pid)

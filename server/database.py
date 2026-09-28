@@ -5,6 +5,8 @@ Saves chapters, paragraphs, progress, glossaries, and settings incrementally.
 import os
 import json
 import time
+import re
+import tempfile
 from typing import List, Optional, Dict
 from dataclasses import asdict
 from core.parser import BookProject, BookChapter, BookParagraph
@@ -16,6 +18,29 @@ PROJECTS_DIR = os.path.join(DATA_DIR, "projects")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
 os.makedirs(PROJECTS_DIR, exist_ok=True)
+
+def project_path(project_id: str, *parts: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", project_id):
+        raise ValueError("Invalid project identifier")
+    if any(not part or part in (".", "..") or "/" in part or "\\" in part or ":" in part for part in parts):
+        raise ValueError("Invalid storage path component")
+    root = os.path.realpath(PROJECTS_DIR)
+    target = os.path.realpath(os.path.join(root, project_id, *parts))
+    if os.path.commonpath([root, target]) != root or target == root:
+        raise ValueError("Path escapes project storage")
+    return target
+
+def atomic_write_json(path: str, data) -> None:
+    descriptor, temporary = tempfile.mkstemp(dir=os.path.dirname(path), suffix=".tmp")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
 
 
 class ProjectManager:
@@ -39,8 +64,7 @@ class ProjectManager:
 
     @staticmethod
     def save_settings(settings: dict) -> None:
-        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-            json.dump(settings, f, ensure_ascii=False, indent=2)
+        atomic_write_json(SETTINGS_FILE, settings)
 
     @classmethod
     def list_projects(cls) -> List[dict]:
@@ -65,7 +89,7 @@ class ProjectManager:
 
     @classmethod
     def save_new_project(cls, project: BookProject, glossary: Optional[BookGlossary] = None) -> None:
-        proj_dir = os.path.join(PROJECTS_DIR, project.id)
+        proj_dir = project_path(project.id)
         os.makedirs(proj_dir, exist_ok=True)
         chapters_dir = os.path.join(proj_dir, "chapters")
         os.makedirs(chapters_dir, exist_ok=True)
@@ -76,9 +100,8 @@ class ProjectManager:
 
         # Save chapters individually
         for chap in project.chapters:
-            chap_file = os.path.join(chapters_dir, f"{chap.id}.json")
-            with open(chap_file, "w", encoding="utf-8") as f:
-                json.dump(asdict(chap), f, ensure_ascii=False)
+            chap_file = project_path(project.id, "chapters", f"{chap.id}.json")
+            atomic_write_json(chap_file, asdict(chap))
 
         # Save glossary
         if not glossary:
@@ -90,7 +113,7 @@ class ProjectManager:
 
     @classmethod
     def update_project_meta(cls, project: BookProject) -> None:
-        proj_dir = os.path.join(PROJECTS_DIR, project.id)
+        proj_dir = project_path(project.id)
         meta_file = os.path.join(proj_dir, "meta.json")
 
         meta = {
@@ -109,12 +132,11 @@ class ProjectManager:
             "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
         }
 
-        with open(meta_file, "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=2)
+        atomic_write_json(meta_file, meta)
 
     @classmethod
     def load_project(cls, project_id: str, load_all_paragraphs: bool = False) -> Optional[BookProject]:
-        proj_dir = os.path.join(PROJECTS_DIR, project_id)
+        proj_dir = project_path(project_id)
         meta_file = os.path.join(proj_dir, "meta.json")
         if not os.path.exists(meta_file):
             return None
@@ -135,8 +157,7 @@ class ProjectManager:
                     if load_all_paragraphs:
                         paras = [BookParagraph(**p) for p in c_data.get("paragraphs", [])]
                     else:
-                        # Lightweight: store basic info without full paragraphs for chapter listing
-                        paras = [BookParagraph(id=p["id"], original_text="", status=p.get("status", "pending")) for p in c_data.get("paragraphs", [])]
+                        paras = [BookParagraph(id=p["id"], original_text=p.get("original_text", ""), status=p.get("status", "pending")) for p in c_data.get("paragraphs", [])]
 
                     chap = BookChapter(
                         id=c_data["id"],
@@ -162,7 +183,7 @@ class ProjectManager:
 
     @classmethod
     def load_chapter(cls, project_id: str, chapter_id: str) -> Optional[BookChapter]:
-        chap_file = os.path.join(PROJECTS_DIR, project_id, "chapters", f"{chapter_id}.json")
+        chap_file = project_path(project_id, "chapters", f"{chapter_id}.json")
         if not os.path.exists(chap_file):
             return None
 
@@ -181,10 +202,8 @@ class ProjectManager:
 
     @classmethod
     def save_chapter(cls, project_id: str, chapter: BookChapter) -> None:
-        proj_dir = os.path.join(PROJECTS_DIR, project_id)
-        chap_file = os.path.join(proj_dir, "chapters", f"{chapter.id}.json")
-        with open(chap_file, "w", encoding="utf-8") as f:
-            json.dump(asdict(chapter), f, ensure_ascii=False)
+        chap_file = project_path(project_id, "chapters", f"{chapter.id}.json")
+        atomic_write_json(chap_file, asdict(chapter))
 
         # Update meta
         project = cls.load_project(project_id, load_all_paragraphs=False)
@@ -211,7 +230,7 @@ class ProjectManager:
 
     @classmethod
     def load_glossary(cls, project_id: str) -> BookGlossary:
-        g_file = os.path.join(PROJECTS_DIR, project_id, "glossary.json")
+        g_file = project_path(project_id, "glossary.json")
         if os.path.exists(g_file):
             try:
                 with open(g_file, "r", encoding="utf-8") as f:
@@ -222,6 +241,5 @@ class ProjectManager:
 
     @classmethod
     def save_glossary(cls, project_id: str, glossary: BookGlossary) -> None:
-        g_file = os.path.join(PROJECTS_DIR, project_id, "glossary.json")
-        with open(g_file, "w", encoding="utf-8") as f:
-            json.dump(glossary.to_dict(), f, ensure_ascii=False, indent=2)
+        g_file = project_path(project_id, "glossary.json")
+        atomic_write_json(g_file, glossary.to_dict())

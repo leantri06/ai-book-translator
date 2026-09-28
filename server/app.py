@@ -9,6 +9,7 @@ import asyncio
 import json
 import requests
 from typing import Optional, List
+import re
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -18,15 +19,28 @@ from pydantic import BaseModel
 from core.parser import BookParser, BookProject, BookChapter, BookParagraph
 from core.glossary import BookGlossary, CharacterPronoun, TerminologyItem
 from core.exporter import BookExporter
-from server.database import ProjectManager, PROJECTS_DIR, SETTINGS_FILE
+from server.database import ProjectManager, PROJECTS_DIR, SETTINGS_FILE, project_path, atomic_write_json
 from server.translator_worker import worker_instance
 
 app = FastAPI(title="AI Book Translator Pro", version="2.0")
 
+@app.middleware("http")
+async def validate_project_path(request: Request, call_next):
+    parts = request.url.path.split("/")
+    if len(parts) > 3 and parts[1:3] == ["api", "projects"]:
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", parts[3]):
+            return JSONResponse(status_code=400, content={"detail": "Invalid project identifier"})
+        if len(parts) > 5 and parts[4] in ("chapters", "images"):
+            try:
+                project_path(parts[3], parts[4], parts[5])
+            except ValueError:
+                return JSONResponse(status_code=400, content={"detail": "Invalid resource path"})
+    return await call_next(request)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=[],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -79,7 +93,7 @@ def get_settings():
 
 @app.post("/api/settings")
 def save_settings(settings: SettingsModel):
-    ProjectManager.save_settings(settings.dict())
+    ProjectManager.save_settings(settings.model_dump())
     return {"status": "ok", "message": "Cấu hình API đã được lưu thành công."}
 
 
@@ -192,22 +206,30 @@ def list_projects():
 
 
 @app.post("/api/projects/upload")
-async def upload_book(file: UploadFile = File(...)):
+def upload_book(file: UploadFile = File(...)):
     """Uploads a book file, parses it, and creates a new project."""
-    filename = file.filename
+    filename = os.path.basename((file.filename or "").replace("\\", "/"))
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in (".epub", ".pdf", ".docx", ".doc", ".txt", ".md"):
+    if ext not in (".epub", ".pdf", ".docx", ".txt", ".md"):
         raise HTTPException(status_code=400, detail="Định dạng file không hỗ trợ. Vui lòng tải file EPUB, PDF, DOCX, TXT.")
 
     import uuid
-    project_id = str(uuid.uuid4())[:8]
-    save_path = os.path.join(UPLOADS_DIR, f"{project_id}_{filename}")
-
-    with open(save_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+    project_id = uuid.uuid4().hex
+    save_path = os.path.join(UPLOADS_DIR, f"{project_id}{ext}")
 
     try:
+        total_bytes = 0
+        with open(save_path, "wb") as buffer:
+            while block := file.file.read(1024 * 1024):
+                total_bytes += len(block)
+                if total_bytes > 100 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="File exceeds 100 MiB limit")
+                buffer.write(block)
+        if not total_bytes:
+            raise HTTPException(status_code=400, detail="Empty upload")
         project = BookParser.parse_file(save_path, project_id)
+        if ext in (".txt", ".md"):
+            project.title = os.path.splitext(filename)[0]
         # Pre-seed glossary with default novel tone
         glossary = BookGlossary()
         ProjectManager.save_new_project(project, glossary)
@@ -221,7 +243,16 @@ async def upload_book(file: UploadFile = File(...)):
             "words_count": project.total_words
         }
     except Exception as e:
+        if os.path.isfile(save_path):
+            os.remove(save_path)
+        partial_project = project_path(project_id)
+        if os.path.isdir(partial_project):
+            shutil.rmtree(partial_project)
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(status_code=500, detail=f"Lỗi khi đọc file: {str(e)}")
+    finally:
+        file.file.close()
 
 
 @app.get("/api/projects/{project_id}")
@@ -259,7 +290,7 @@ def get_project_details(project_id: str):
 
 @app.put("/api/projects/{project_id}/meta")
 def update_project_metadata(project_id: str, data: ProjectMetaUpdateModel):
-    proj_dir = os.path.join(PROJECTS_DIR, project_id)
+    proj_dir = project_path(project_id)
     meta_file = os.path.join(proj_dir, "meta.json")
     if not os.path.exists(meta_file):
         raise HTTPException(status_code=404, detail="Không tìm thấy dự án")
@@ -269,21 +300,22 @@ def update_project_metadata(project_id: str, data: ProjectMetaUpdateModel):
         meta["title"] = data.title.strip()
     if data.author is not None:
         meta["author"] = data.author.strip()
-    with open(meta_file, "w", encoding="utf-8") as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    atomic_write_json(meta_file, meta)
     return {"status": "ok", "message": "Đã cập nhật thông tin dự án.", "title": meta["title"], "author": meta["author"]}
 
 
 @app.delete("/api/projects/{project_id}")
 def delete_project(project_id: str):
+    if worker_instance.is_running(project_id):
+        raise HTTPException(status_code=409, detail="Stop translation and wait before deleting")
     worker_instance.stop_translation(project_id)
-    proj_dir = os.path.join(PROJECTS_DIR, project_id)
+    proj_dir = project_path(project_id)
     if os.path.exists(proj_dir):
         shutil.rmtree(proj_dir, ignore_errors=True)
     try:
         if os.path.exists(UPLOADS_DIR):
             for fname in os.listdir(UPLOADS_DIR):
-                if fname.startswith(f"{project_id}_"):
+                if fname.startswith(f"{project_id}_") or os.path.splitext(fname)[0] == project_id:
                     fpath = os.path.join(UPLOADS_DIR, fname)
                     if os.path.isfile(fpath):
                         os.remove(fpath)
@@ -323,7 +355,7 @@ def get_chapter(project_id: str, chapter_id: str):
 @app.get("/api/projects/{project_id}/images/{image_name}")
 def get_project_image(project_id: str, image_name: str):
     from fastapi.responses import FileResponse
-    img_path = os.path.join(PROJECTS_DIR, project_id, "images", image_name)
+    img_path = project_path(project_id, "images", image_name)
     if not os.path.exists(img_path):
         raise HTTPException(status_code=404, detail="Không tìm thấy hình ảnh")
     return FileResponse(img_path)
@@ -331,6 +363,8 @@ def get_project_image(project_id: str, image_name: str):
 
 @app.put("/api/projects/{project_id}/chapters/{chapter_id}/paragraphs/{para_id}")
 def update_paragraph(project_id: str, chapter_id: str, para_id: str, payload: ParagraphUpdateModel):
+    if worker_instance.is_running(project_id):
+        raise HTTPException(status_code=409, detail="Stop translation before editing")
     success = ProjectManager.update_paragraph(project_id, chapter_id, para_id, payload.translated_text, status="edited")
     if not success:
         raise HTTPException(status_code=404, detail="Không tìm thấy đoạn văn bản")
@@ -339,6 +373,10 @@ def update_paragraph(project_id: str, chapter_id: str, para_id: str, payload: Pa
 
 @app.post("/api/projects/{project_id}/translate/start")
 def start_translation(project_id: str, chapter_id: Optional[str] = None, force: bool = False):
+    if not ProjectManager.load_project(project_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+    if chapter_id and not ProjectManager.load_chapter(project_id, chapter_id):
+        raise HTTPException(status_code=404, detail="Chapter not found")
     success = worker_instance.start_translation(project_id, chapter_id, force_retranslate=force)
     if not success:
         return {"status": "already_running", "message": "Tiến trình dịch đang chạy sẵn."}
@@ -364,7 +402,7 @@ def get_glossary(project_id: str):
 
 @app.post("/api/projects/{project_id}/glossary")
 def save_glossary(project_id: str, data: GlossaryUpdateModel):
-    glossary = BookGlossary.from_dict(data.dict())
+    glossary = BookGlossary.from_dict(data.model_dump())
     ProjectManager.save_glossary(project_id, glossary)
     return {"status": "ok", "message": "Đã lưu bảng thuật ngữ và quy tắc xưng hô."}
 

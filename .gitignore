@@ -13,6 +13,8 @@ data/projects/*
 !data/projects/.gitkeep
 
 # Environments & Keys
+.venv/
+venv/
 .env
 *.env
 *.log

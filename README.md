@@ -1,175 +1,349 @@
-# 📚 AI Book & Research Paper Translator Pro (V3.5)
+# AI Book & Research Paper Translator Pro
 
-<p align="center">
-  <strong>Phần mềm dịch sách & bài báo khoa học tiếng Anh sang tiếng Việt chuyên sâu với chất lượng xuất bản cao cấp</strong><br>
-  <em>Hỗ trợ chạy song song đa luồng nhiều API Key, bóc tách chuẩn bố cục 2 cột (Two-Column Paper), bóc tách bảng biểu & sơ đồ vector không viền, công thức toán chuẩn Kindle (EPUB / MathML), định nghĩa nhân vật & xưng hô đồng nhất.</em>
-</p>
+Ứng dụng Python chạy cục bộ, dùng giao diện web để dịch sách và tài liệu tiếng Anh sang tiếng Việt, quản lý thuật ngữ, đối chiếu từng đoạn và xuất bản dịch.
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/FastAPI-Backend-green?style=flat-square&logo=fastapi" alt="FastAPI">
-  <img src="https://img.shields.io/badge/Multi--Key-Parallel_Engine-blueviolet?style=flat-square" alt="Multi-Key">
-  <img src="https://img.shields.io/badge/Google_Gemini-3.5_Flash_%2F_Lite_%2F_Pro-orange?style=flat-square&logo=google" alt="Gemini">
-  <img src="https://img.shields.io/badge/Ollama-Offline_AI_7B-purple?style=flat-square&logo=ollama" alt="Ollama">
-  <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=flat-square" alt="License">
-</p>
+> **Phạm vi:** công cụ hỗ trợ dịch và biên tập, không bảo đảm bản dịch đạt chất lượng xuất bản hoặc giữ nguyên mọi chi tiết bố cục. Hãy thử một chương trước khi dịch cả sách. Các tên model và nhãn quảng bá trong giao diện là cấu hình có sẵn trong mã nguồn, không phải xác nhận về khả dụng, giá hoặc quota hiện tại của nhà cung cấp.
 
----
+## Mục lục
 
-## 🌟 Tính Năng Nổi Bật
+1. [Tính năng và định dạng](#1-tính-năng-và-định-dạng)
+2. [Chuẩn bị](#2-chuẩn-bị)
+3. [Cài đặt và khởi động](#3-cài-đặt-và-khởi-động)
+4. [Bắt đầu với một cuốn sách](#4-bắt-đầu-với-một-cuốn-sách)
+5. [Cấu hình dịch](#5-cấu-hình-dịch)
+6. [Nhân vật, thuật ngữ và văn phong](#6-nhân-vật-thuật-ngữ-và-văn-phong)
+7. [Dịch, tạm dừng và dịch lại](#7-dịch-tạm-dừng-và-dịch-lại)
+8. [Đọc và sửa bản dịch](#8-đọc-và-sửa-bản-dịch)
+9. [Xuất sách](#9-xuất-sách)
+10. [Dữ liệu và sao lưu](#10-dữ-liệu-và-sao-lưu)
+11. [Xử lý sự cố](#11-xử-lý-sự-cố)
+12. [Bảo mật và giới hạn](#12-bảo-mật-và-giới-hạn)
+13. [Phát triển và kiểm thử](#13-phát-triển-và-kiểm-thử)
 
-### 1. ⚡ Động Cơ Dịch Song Song Đa Luồng (Multi-Key Parallel Concurrency)
-- **Tăng tốc theo cấp số nhân ($N \times$)**: Cho phép nhập nhiều Google Gemini API Key cùng lúc (từ nhiều tài khoản Gmail khác nhau). Mỗi key sẽ chạy trên 1 luồng độc lập:
-  - 1 Key: Tốc độ chuẩn 15 RPM.
-  - 3 Keys: Tốc độ nhân gấp **3 lần** (~45 RPM).
-  - 6 Keys: Tốc độ nhân gấp **6 lần** (~90 RPM) — dịch xong cả cuốn tiểu thuyết hoặc bài báo khoa học lớn chỉ trong vài phút!
-- **Cô lập Quota hoàn hảo (Isolated Key Cooldown)**: Nếu Key #1 bị chạm giới hạn 15 RPM, hệ thống chỉ tạm dừng riêng Key #1 (nghỉ 30s), trong khi **các key còn lại vẫn tiếp tục dịch liên tục**, không hề bị gián đoạn.
-- **Tự động chuyển giao (Failover)**: Đoạn sách đang dịch dở trên key bị lỗi sẽ tự động được chuyển ngay cho key còn trống tiếp quản.
-- **Nhận diện trực quan**: Giao diện tự động đếm số lượng key, gắn nhãn huy hiệu `🚀 N Keys (Song song)` và thông báo hệ số nhân tốc độ.
+## 1. Tính năng và định dạng
 
-### 2. 🔬 Chuyên Sâu Dịch Bài Báo Khoa Học & Bố Cục 2 Cột (Academic / AI Papers V3.5)
-- **Bóc tách cấu trúc 2 cột thông minh (Two-Column Paper Structure)**:
-  - Tự động nhận diện chuẩn xác các đề mục học thuật như `Abstract`, `1 Introduction`, `2 Methodology`, `3 Results`, `4 Discussion and Future Work`, `5 Related Work`, `6 Conclusions`, `References`... thành từng chương riêng biệt.
-  - Phân tích luồng đọc theo cột (đọc hết cột trái rồi sang cột phải), không bị xáo trộn câu chữ giữa hai cột văn bản liền kề.
-- **Bảo tồn Bảng biểu không viền & Chống cắt nuốt văn bản (Table Continuity Clustering)**:
-  - Tự động phát hiện vị trí các bảng biểu (chuẩn LaTeX booktabs, bảng không viền dọc) và kết xuất thành ảnh PNG độ nét cao (250 DPI).
-  - **Phân vùng cột chặt chẽ & Liên kết khoảng cách liên tục**: Giới hạn tọa độ theo từng cột (`pw * 0.45` / `pw * 0.55`), tự động loại trừ các khối ghi chú đặc biệt (callout boxes như `RQ1`, `RQ2`), chấm dứt triệt để lỗi cắt bảng quá tay nuốt mất văn bản bên dưới.
-  - **Loại trừ triệt để dữ liệu số liệu thô trong bảng khỏi luồng dịch**: Giữ lại tiêu đề bảng để dịch chuẩn xác sang tiếng Việt (`Bảng 1`, `Bảng 2`...), không làm AI dịch nhầm số liệu ma trận hay bảng thống kê.
-- **Trích xuất Sơ đồ Vector & Biểu đồ trực quan (PyMuPDF Vector Engine)**:
-  - Quét và trích xuất không chỉ ảnh raster thông thường mà cả các **sơ đồ Vector Graphics**, Form XObjects, hình vẽ kiến trúc (như Figure 1, Figure 2 trong Transformer), biểu đồ Attention Visualizations và kết xuất thành ảnh PNG 250 DPI sắc nét.
-  - Tự động mở rộng lề trên (`union_r.y0 - 35`) đảm bảo các nhãn văn bản của sơ đồ không bị cắt xén.
-- **Định dạng Công thức Toán học chuẩn mực (Kindle Math & MathML Engine)**:
-  - Tự động cô lập công thức toán độc lập có đánh số hiệu (`(1)`, `(2)`, `(3)`) và tách biệt hoàn toàn khỏi đoạn văn xuôi phía sau.
-  - Hỗ trợ cú pháp chuẩn `\tag{...}`, gộp các khối công thức liên tiếp thành một thẻ `.math-block` liền mạch, có khung hiển thị chuyên nghiệp.
-  - Tự động chuyển đổi công thức LaTeX sang ảnh PNG 300 DPI nền trong suốt nhúng vào EPUB, tương thích hoàn hảo 100% với máy đọc sách Kindle Paperwhite, Oasis, Scribe, app Kindle và hỗ trợ Dark Mode.
-- **Lọc sạch Header & Footer trang bài báo**:
-  - Tự động loại bỏ hoàn toàn các running header hội nghị (`FORGE '26...`, arXiv timestamps) và số trang chạy đầu/cuối trang, giữ nội dung dịch liền mạch và chuẩn sách in.
-- **Tái tạo đoạn văn thông minh (Smart Paragraph Reconstruction)**:
-  - Tự động ghép nối các từ bị gãy dấu gạch nối cuối dòng (`transduc-\n tion` ➔ `transduction`), phát hiện chuẩn xác ranh giới đoạn văn theo cấu trúc căn lề, chấm dứt hoàn toàn tình trạng dính chữ dính đoạn.
+- Tách tài liệu thành chương và đoạn; lưu tiến độ trong thư mục dữ liệu cục bộ.
+- Dịch một chương hoặc các phần còn thiếu của sách; có lệnh dịch lại từ đầu.
+- Cấu hình nhà cung cấp, model, API key và endpoint tương thích.
+- Quản lý nhân vật, đại từ xưng hô, thuật ngữ và yêu cầu bổ sung.
+- Giao diện song ngữ để sửa từng đoạn và chế độ đọc sách có tùy chỉnh hiển thị.
+- Hỗ trợ trích xuất ảnh và xử lý cấu trúc tài liệu học thuật, bảng và công thức ở mức phụ thuộc tài liệu nguồn.
+- Worker hỗ trợ nhiều key, retry và cooldown; tối đa 6 worker theo số key và số chunk. Không bảo đảm tăng tốc tuyến tính.
 
-### 3. 🔍 Kiểm Tra Quota & Sức Khỏe Key 1-Chạm (1-Click Quota Health Check)
-- **Nút "🔍 Kiểm tra Quota & Sức khỏe Key"** ngay trong bảng Cài đặt.
-- **Kiểm tra song song trong 1-2 giây**: Quét đồng thời toàn bộ các key qua các mô hình (`gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.7-flash`).
-- **Phân loại trạng thái rõ ràng**:
-  - 🟢 **Sẵn sàng**: Key khỏe mạnh, còn nguyên quota để dịch ngay.
-  - 🟡 **Chờ hồi lượt (15 RPM)**: Tạm nghỉ 20-30s để hồi quota phút.
-  - 🟠 **Hết hạn mức 24h (Daily Quota)**: Báo rõ model đã chạm ngưỡng ngày và gợi ý model còn lượt.
-  - 🔴 **Lỗi / Không hợp lệ**: Báo khi key sai định dạng hoặc bị khóa.
+### Đầu vào
 
-### 4. 🛡️ Cơ Chế Cứu Trợ Tự Động (Auto Safety-Filter Fallback)
-- **Vượt qua bộ lọc kiểm duyệt quá khắt khe của Google**: Với các tác phẩm kỳ ảo/lãng mạn chứa từ ngữ nhạy cảm khiến AI từ chối phản hồi (`PROHIBITED_CONTENT`), hệ thống sẽ **tự động kích hoạt bộ dịch Google Translate thế chỗ ngay tức thì**.
-- **Cam kết 100% không sót đoạn**: Không bao giờ xảy ra tình trạng bỏ sót hay để trống bất kỳ đoạn văn nào trong sách.
-- **Kho mô hình dự phòng phong phú**: Tự động luân chuyển giữa `gemini-3.5-flash` ➔ `gemini-3.5-flash-lite` ➔ `gemini-3.1-flash-lite` ➔ `gemini-3.7-flash` ➔ `gemini-flash-lite-latest`.
+| Định dạng | Ghi chú |
+| --- | --- |
+| EPUB | Phù hợp với sách điện tử có văn bản và cấu trúc chương. |
+| PDF | Ưu tiên PDF có lớp văn bản; thứ tự đọc và bố cục phức tạp cần kiểm tra. |
+| DOCX | Tệp Word hiện đại; không hỗ trợ định dạng DOC cũ. |
+| TXT, MD | Văn bản thuần; nên dùng UTF-8. Markdown không được bảo đảm giữ mọi cú pháp. |
 
-### 5. ✍️ Văn Phong Thuần Việt & Giàu Chất Văn Học
-- **Chấm dứt hoàn toàn dịch thô (word-by-word)**: Câu cú được biên tập uyển chuyển, giàu hình ảnh, nhịp điệu tự nhiên như sách xuất bản chuyên nghiệp.
-- **Hỗ trợ đa dạng AI**:
-  - **Google Gemini**: Dịch văn học cực hay, mát máy (0% GPU), hoàn toàn miễn phí.
-  - **Ollama Offline**: Chạy 100% trên GPU cá nhân (GTX/RTX 8GB VRAM) với `qwen2.5:7b` — không cần internet, bảo mật tuyệt đối, vĩnh viễn không lo hết quota.
-  - **DeepSeek (V3 / R1)**: Tốc độ cao, chi phí siêu rẻ, tiếng Việt xuất sắc.
-  - **OpenAI & OpenRouter**: Hỗ trợ GPT-4o, Claude 3.5 Sonnet, v.v.
+Giới hạn mỗi lần upload: **100 MiB**. File rỗng bị từ chối. File và dự án tạo dở được dọn nếu quá trình upload/phân tích thất bại.
 
-### 6. 👥 Quản Lý Nhân Vật, Thuật Ngữ & Dự Án Chuyên Nghiệp
-- **AI Tự phân tích nhân vật**: Tự động quét bách khoa toàn thư tác phẩm để thiết lập danh sách nhân vật, vai trò và đại từ xưng hô phù hợp (*tôi - cậu, anh - em, chàng - nàng, sư phụ - đồ đệ*).
-- **Chuẩn hóa thuật ngữ AI / Khoa học máy tính**: Giữ thuật ngữ tiếng Anh trong ngoặc đơn (hoặc giữ nguyên các thuật ngữ quốc tế phổ biến như *Self-Attention*, *Transformer*, *Residual Connection*, *Softmax*, *Dropout*, *BLEU score*).
-- **Xóa dự án an toàn 1-chạm (Safe Delete Modal)**: Nút xóa kèm cửa sổ xác nhận cảnh báo màu đỏ, hỗ trợ xóa sạch dữ liệu, cache và ảnh đã trích xuất ngay lập tức mà không cần F5.
+### Đầu ra trong giao diện
 
-### 7. 🔄 Linh Hoạt Dịch Lại ("Dịch lại từ đầu")
-- Nút **`🔄 Dịch lại từ đầu`** giúp dễ dàng xóa sạch bản dịch cũ của một chương bất kỳ và dịch lại từ đầu bằng mô hình AI mới xịn hơn chỉ với 1 click.
+EPUB tiếng Việt, EPUB song ngữ, DOCX, HTML và TXT. Chức năng PDF sử dụng **in trang HTML ra PDF qua trình duyệt**, không phải tạo file PDF trực tiếp ở backend.
 
-### 8. 📖 Giao Diện Kép Hiện Đại (Studio & Reader)
-- **Dual Studio (Song ngữ đối chiếu)**: Đối chiếu từng đoạn tiếng Anh và tiếng Việt, cho phép nhấp chuột sửa trực tiếp bản dịch với tính năng tự động lưu.
-- **Kindle Reader Mode**: Chế độ đọc sách sang trọng, hỗ trợ tùy biến phông chữ (Merriweather Serif / Outfit Sans-serif), cỡ chữ và chế độ hiển thị:
-  - *Chỉ tiếng Việt (kèm cảnh báo thông minh nếu chương chưa dịch)*
-  - *Song ngữ đối chiếu từng đoạn*
-  - *Chỉ tiếng Anh*
+## 2. Chuẩn bị
 
-### 9. 📱 Bảo Toàn 100% Định Dạng & Xuất Bản Đa Dạng
-- **Đọc đa định dạng**: Hỗ trợ **EPUB** (kể cả file sinh ra từ Calibre), **PDF**, **DOCX**, **TXT**.
-- **Xuất bản chuyên nghiệp**:
-  - 📕 **EPUB Tiếng Việt**: Giữ nguyên toàn bộ ảnh minh họa, trang bìa, mục lục (sẵn sàng đọc trên Kindle, Kobo, iPad).
-  - 📗 **EPUB Song Ngữ**: Tuyệt vời để học tiếng Anh qua sách.
-  - 📄 **Word (.DOCX)**: Đầy đủ mục lục, căn lề chuẩn in ấn.
-  - 🌐 **HTML Reader / In PDF**: Trực quan, nhúng ảnh base64 độc lập, hỗ trợ bấm `Ctrl + P` lưu file PDF chuẩn sách in.
+- Python **3.10 trở lên**, có pip.
+- Git nếu tải dự án bằng lệnh clone; cũng có thể tải ZIP mã nguồn rồi giải nén.
+- Trình duyệt web và dung lượng lưu trữ cho sách, ảnh trích xuất, bản xuất và thư viện Python.
+- Internet khi cài thư viện hoặc dùng dịch vụ dịch từ xa.
+- API key hợp lệ nếu nhà cung cấp yêu cầu; tài khoản cần có quyền dùng model đã chọn.
+- Nếu dùng Ollama: tự cài dịch vụ và tải model phù hợp với máy. Repository không cung cấp sẵn model.
 
----
+Giao diện frontend không cần bước build bằng npm. Dùng môi trường ảo riêng để tránh trộn thư viện với các dự án khác.
 
-## 🚀 Hướng Dẫn Cài Đặt & Sử Dụng
+## 3. Cài đặt và khởi động
 
-### 1. Khởi động nhanh trên Windows (Khuyên dùng)
-Chỉ cần nhấp đúp chuột vào file **`run.bat`** ở thư mục gốc:
-```bat
-d:\ai_book_translator\run.bat
-```
-- File `run.bat` thế hệ mới sẽ **tự động kiểm tra Python**, **tự cài đặt thư viện thiếu** qua `requirements.txt`, thiết lập mã hóa UTF-8 và tự động mở trình duyệt tại: **`http://localhost:8000`**.
+### Windows: cách khuyên dùng
 
-### 2. Khởi động thủ công bằng dòng lệnh
-```bash
-# 1. Cài đặt các thư viện phụ thuộc
-pip install -r requirements.txt
+Mở PowerShell tại thư mục muốn lưu project:
 
-# 2. Khởi chạy server
-python main.py
-```
+~~~powershell
+git clone https://github.com/leantri06/ai-book-translator.git
+cd ai-book-translator
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe main.py
+~~~
 
----
+Không cần kích hoạt môi trường ảo khi gọi Python bằng đường dẫn như trên. Nếu máy không có lệnh py nhưng đã có Python, thay py bằng python ở bước tạo môi trường.
 
-## ⚙️ Cấu Hình Chạy Song Song Đa Luồng Nhiều Key
+**Những lần chạy sau:**
 
-1. Mở giao diện web tại `http://localhost:8000`.
-2. Bấm vào biểu tượng **⚙️ Cài đặt API** trên thanh menu.
-3. Tại ô **API Key**, dán các Gemini API Key từ nhiều tài khoản Gmail khác nhau, cách nhau bằng **dấu phẩy (,)** hoặc **xuống dòng**:
-   ```text
-   AIzaSyA_KeyThuNhat...,
-   AIzaSyB_KeyThuHai...,
-   AIzaSyC_KeyThuBa...
-   ```
-4. Bấm **"🔍 Kiểm tra Quota & Sức khỏe Key"** để xem báo cáo tình trạng từng Key.
-5. Bấm **"Lưu Cấu Hình"**.
-6. Bấm **"▶ Bắt đầu Dịch"** để trải nghiệm tốc độ dịch song song siêu tốc!
+~~~powershell
+cd <thu-muc-chua-project>
+.\.venv\Scripts\python.exe main.py
+~~~
 
----
+### Windows: chạy bằng run.bat
 
-## 📖 Bảng So Sánh Các Nhà Cung Cấp AI
+Có thể nhấp đúp run.bat sau khi cài Python vào PATH. Script tìm python hoặc py, kiểm tra một số thư viện và cài requirements.txt nếu kiểm tra thất bại, rồi chạy main.py.
 
-| Nhà Cung Cấp | Mô Hình Tiêu Biểu | Tốc Độ & Tài Nguyên | Chi Phí & Giới Hạn | Khuyên Dùng Cho |
-| :--- | :--- | :--- | :--- | :--- |
-| **Google Gemini (Đa luồng)** | `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.7-flash` | Siêu nhanh, 0% GPU, hỗ trợ chạy 5-10 key song song | **Miễn phí 100%** (15 RPM / 1.500 RPD mỗi key) | **Dịch sách chất lượng cao nhất & nhanh nhất** |
-| **Ollama Local** | `qwen2.5:7b` (Cần GPU 8GB VRAM) | Chạy nội bộ, ~75-82°C GPU | **$0 trọn đời**, không cần mạng, không giới hạn | Dịch tài liệu nhạy cảm, bảo mật cao |
-| **DeepSeek** | `deepseek-chat` (V3), `deepseek-reasoner` (R1) | Tốc độ cao, máy chủ đám mây | Siêu rẻ (~3.000 VNĐ / cả cuốn sách) | Sách có văn phong dịch tiếng Việt cần trau chuốt |
-| **Dịch tự động miễn phí** | `free-fallback` | Trung bình | Miễn phí (không cần API key) | Đọc thử nhanh, cứu hộ khi AI chặn |
+**Lưu ý:** run.bat không tự tạo hoặc ưu tiên .venv. Nếu đã cài thư viện trong .venv, dùng lệnh khởi động bên trên; hoặc kích hoạt .venv trong terminal trước khi chạy run.bat. Nếu script bỏ sót thư viện còn thiếu, cài lại requirements.txt bằng đúng Python đang dùng.
 
----
+### macOS / Linux
 
-## 🛠️ Cấu Trúc Dự Án
+~~~bash
+git clone https://github.com/leantri06/ai-book-translator.git
+cd ai-book-translator
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python main.py
+~~~
 
-```
-ai_book_translator/
-├── core/                   # Bộ máy xử lý cốt lõi
-│   ├── parser.py           # Trích xuất EPUB (Calibre), PDF 2 cột, DOCX, TXT, sơ đồ vector & bảng
-│   ├── chunker.py          # Chia đoạn ngữ cảnh thông minh, gắn mã [[[P_id]]]
-│   ├── translator.py       # Engine gọi AI (Gemini, Ollama, DeepSeek, Multi-Model, Fallback)
-│   ├── glossary.py         # Quản lý nhân vật, đại từ xưng hô & thuật ngữ
-│   └── exporter.py         # Xuất bản EPUB Kindle, EPUB song ngữ, DOCX, HTML standalone
-├── server/                 # Máy chủ backend FastAPI
-│   ├── app.py              # REST API, điều khiển tiến trình, xóa dự án & kiểm tra Quota
-│   ├── database.py         # Quản lý dữ liệu dự án & tự động lưu từng đoạn
-│   └── translator_worker.py# KeyPool đa luồng, cách ly quota, tự động failover
-├── web/                    # Giao diện Single Page App (Dark Glassmorphism)
-│   ├── index.html          # Cấu trúc giao diện Dual Studio, Reader & Modal Quota / Delete
-│   ├── app.css             # Thiết kế hiện đại chuẩn giao diện cao cấp
-│   └── app.js              # Logic giao diện, kiểm tra Quota, đếm key, modal xóa & polling
-├── data/                   # Dữ liệu người dùng (dự án, upload & file xuất bản)
-│   ├── projects/           # Lưu trữ các chương sách, ảnh trích xuất và thuật ngữ
-│   ├── uploads/            # File PDF/EPUB/DOCX tải lên
-│   └── exports/            # File đầu ra đã xuất (.epub, .docx, .html)
-├── main.py                 # File khởi động chính (tự động dò cổng và mở trình duyệt)
-├── run.bat                 # Trình khởi chạy 1-click cho Windows (tự kiểm tra dependencies)
-└── requirements.txt        # Danh sách thư viện cần thiết
-```
+Đây là cách chạy Python tương đương; bộ kiểm thử được ghi nhận trong lần nâng cấp này chạy trên Windows, không phải chứng nhận đã kiểm thử mọi hệ điều hành.
 
----
+### Truy cập và tắt ứng dụng
 
-## 📜 Bản Quyền
+Launcher bind server vào 127.0.0.1, ưu tiên cổng 8000 và thử cổng khác nếu bị chiếm. Trình duyệt được mở tự động; nếu không mở, xem địa chỉ được in trong terminal.
 
-Dự án được phát hành theo giấy phép **MIT License**. Tự do sử dụng, chỉnh sửa và phân phối cho mục đích cá nhân và phi thương mại.
+~~~text
+http://localhost:8000
+~~~
+
+Giữ terminal mở khi dùng ứng dụng. Để tắt an toàn, tạm dừng dịch, chờ worker kết thúc rồi nhấn Ctrl+C trong terminal. Đóng tab trình duyệt không đồng nghĩa với dừng server hoặc dừng dịch.
+
+## 4. Bắt đầu với một cuốn sách
+
+1. Khởi động ứng dụng và mở **Cài đặt API**.
+2. Chọn nhà cung cấp, model và nhập key/endpoint nếu cần; bấm lưu cấu hình.
+3. Chọn **Tải sách lên**, chọn file hợp lệ và chờ phân tích.
+4. Chọn dự án và một chương trong danh sách bên trái; kiểm tra văn bản gốc có đúng thứ tự hay không.
+5. Mở **Nhân vật & Văn phong**, chọn văn phong và bổ sung thuật ngữ quan trọng; lưu lại.
+6. Bấm **Dịch chương này** để thử một chương ngắn.
+7. Theo dõi log, đọc và sửa một số đoạn. Nếu cấu hình hoặc cách xưng hô chưa phù hợp, điều chỉnh trước khi dịch toàn bộ.
+8. Dịch các phần còn lại, rà soát những đoạn chưa dịch rồi xuất sách.
+
+Với PDF scan chỉ chứa ảnh, hãy OCR bằng công cụ riêng trước khi tải lên; project chưa có quy trình OCR đầy đủ tích hợp.
+
+## 5. Cấu hình dịch
+
+Cấu hình được lưu cục bộ và dùng chung giữa các dự án. Để áp dụng thay đổi một cách rõ ràng, dừng phiên dịch hiện tại, chờ kết thúc, lưu cấu hình mới rồi bắt đầu lại.
+
+### Các trường chính
+
+| Trường | Cách sử dụng |
+| --- | --- |
+| Nhà cung cấp | Chọn backend tương ứng với tài khoản hoặc dịch vụ cục bộ. |
+| API key | Nhập key; không chụp màn hình hoặc đưa key vào Git. |
+| Model | Chọn tên có sẵn hoặc **Nhập tên mô hình khác...**; nhập đúng ID được tài khoản cho phép dùng. |
+| Base URL | Địa chỉ gốc API tương thích, thường kết thúc bằng /v1; backend tự nối /chat/completions. |
+
+Tên model hiển thị sẵn có thể cũ hoặc không khả dụng. Một số tên Gemini còn bị engine ánh xạ sang model khác. Khi cần kiểm tra chính xác, đối chiếu log và mã nguồn thay vì giả định tên nhập vào luôn được dùng nguyên trạng.
+
+### Gemini
+
+Nhập key và chọn model, sau đó thử một chương ngắn. Engine có logic thử model dự phòng và trong một số tình huống chuyển sang dịch vụ Google Translate công khai, kể cả khi không có key. Vì vậy không nên dùng nhánh này cho tài liệu bắt buộc chỉ gửi tới một model/provider duy nhất.
+
+### DeepSeek và OpenRouter
+
+Giao diện có điền Base URL theo lựa chọn. Kiểm tra endpoint, model và key trước khi lưu. API tương thích cần hỗ trợ định dạng chat completions mà engine đang gửi.
+
+### OpenAI: giới hạn cấu hình hiện tại
+
+Mã nguồn có nhánh OpenAI-compatible, nhưng backend hiện mặc định sang endpoint DeepSeek nếu Base URL trống, trong khi giao diện lựa chọn OpenAI ẩn trường này và không tự gán endpoint OpenAI. **Không xem lựa chọn OpenAI trong giao diện là đã cấu hình hoàn chỉnh.**
+
+Nếu cần dùng nhánh này, dừng server, sao lưu data/settings.json và chỉnh base_url trong file bằng endpoint đúng của tài khoản rồi khởi động lại. Tránh để nguyên endpoint từ nhà cung cấp trước. README này không xác nhận kết nối OpenAI thực tế đã được kiểm thử.
+
+### Ollama cục bộ
+
+1. Cài và chạy Ollama bên ngoài project.
+2. Tải model trước bằng công cụ của Ollama; chọn model thực sự có trên máy.
+3. Trong ứng dụng chọn Ollama, kiểm tra Base URL và nhập tên model chính xác.
+4. Lưu và thử dịch một đoạn ngắn.
+
+Giá trị Base URL mà giao diện điền sẵn:
+
+~~~text
+http://localhost:11434/v1
+~~~
+
+Các nhãn “đã cài sẵn” trong giao diện không thực hiện kiểm tra máy. Dịch qua Ollama có thể chạy cục bộ sau khi tải model, nhưng không nên suy ra mọi chức năng đều offline: **tự nhận diện nhân vật** có luồng gọi AI riêng và chưa được bảo đảm dùng cùng endpoint cục bộ. Với tài liệu riêng tư, nhập nhân vật/thuật ngữ thủ công và kiểm soát truy cập mạng.
+
+### Chế độ dùng thử không cần key
+
+Chế độ này gọi endpoint Google Translate công khai qua mạng, không phải dịch offline và không có bảo đảm dịch vụ. Văn phong và việc tuân thủ glossary không tương đương nhánh LLM. Nếu lỗi, có thể xuất hiện các tiền tố **[Chưa dịch]** hoặc **[Dịch tự động tạm thời]** kèm nguyên văn. Hãy tìm các dấu hiệu này khi rà soát kết quả.
+
+### Nhiều key và kiểm tra quota
+
+Có thể nhập nhiều key bằng cách xuống dòng, ngăn bằng dấu phẩy hoặc dấu chấm phẩy. Chỉ dùng key hợp lệ mà bạn được phép sử dụng. Các key có thể dùng chung quota; không xem nhiều key là cách bảo đảm tăng hạn mức.
+
+Nút **Kiểm tra Quota & Sức khỏe Key** thực hiện yêu cầu thử; nó không đọc được chính xác số dư hoặc tổng quota còn lại. Với Gemini, danh sách model kiểm tra đang cố định trong mã nguồn, không nhất thiết trùng model bạn nhập. Lỗi model/quyền truy cập hoặc mạng có thể làm kết quả không phản ánh đúng chất lượng key. Yêu cầu kiểm tra cũng có thể tiêu thụ quota hoặc phát sinh chi phí.
+
+## 6. Nhân vật, thuật ngữ và văn phong
+
+Trong **Nhân vật & Văn phong**:
+
+- Chọn tiểu thuyết, kỳ ảo, self-help, học thuật hoặc cổ điển theo loại tài liệu.
+- Với nhân vật, nhập tên, vai trò, giới tính nếu biết, đại từ ngôi thứ nhất/thứ hai/thứ ba và ghi chú quan hệ.
+- Với thuật ngữ, nhập cách viết gốc, bản dịch mong muốn và ghi chú ngữ cảnh.
+- Thêm hướng dẫn riêng, ví dụ: “Giữ nguyên tên riêng; dùng tôi–cậu giữa hai nhân vật chính; không diễn giải thêm nội dung ngoài bản gốc.”
+- Bấm lưu trước khi bắt đầu phiên dịch mới.
+
+Ví dụ quy ước biên tập:
+
+| Nội dung | Quy ước mẫu |
+| --- | --- |
+| Character A nói với Character B | Tôi – cậu |
+| Transformer | Giữ nguyên Transformer |
+| attention mechanism | Cơ chế chú ý (attention mechanism) ở lần đầu |
+
+Tự nhận diện nhân vật chỉ tạo gợi ý; cần kiểm tra và sửa trước khi dùng. Thay đổi glossary không tự sửa những đoạn đã dịch; muốn áp dụng lại phải dịch lại hoặc biên tập thủ công.
+
+## 7. Dịch, tạm dừng và dịch lại
+
+### Dịch tiếp
+
+- **Dịch chương này:** xử lý các phần còn thiếu theo trạng thái của chương đã chọn.
+- Chức năng dịch toàn bộ xử lý những chương chưa hoàn thành.
+- Tiến độ được lưu dần; sau khi khởi động lại, chọn dự án cũ để tiếp tục thay vì upload lại.
+
+### Tạm dừng
+
+Lệnh tạm dừng yêu cầu worker ngừng nhận việc mới; không hủy tức thời HTTP request đang chạy. Chờ trạng thái trở về sẵn sàng. Trong thời gian chạy hoặc đang dừng, ứng dụng chặn khởi động phiên mới, sửa đoạn và xóa dự án để tránh ghi đè dữ liệu.
+
+Không ép đóng ứng dụng chỉ vì yêu cầu dừng chưa phản hồi ngay. Nếu có lỗi hoặc hết quota, đọc log trước khi thử tiếp.
+
+### Dịch lại từ đầu
+
+**Cảnh báo: thao tác này xóa bản dịch cũ, bao gồm phần bạn đã sửa tay trong phạm vi được dịch lại.** Sao lưu trước. Dùng khi đổi model, đổi văn phong hoặc muốn tái tạo cả chương. Nếu chỉ sửa vài lỗi nhỏ, biên tập từng đoạn thường phù hợp hơn.
+
+Tiến độ phản ánh trạng thái xử lý của các đoạn, không phải điểm chất lượng. Đặc biệt, kết quả fallback có thể chứa nguyên văn hoặc dấu báo chưa dịch ngay cả khi đoạn được ghi nhận đã xử lý.
+
+## 8. Đọc và sửa bản dịch
+
+### Song ngữ đối chiếu
+
+Chọn chương, xem bản gốc và bản dịch cạnh nhau. Khi worker đã dừng, nhấp vào bản dịch để sửa rồi nhấp ra ngoài ô: giao diện gửi yêu cầu lưu khi ô mất focus. Kiểm tra log xác nhận trước khi chuyển chương hoặc đóng trang. Nếu lưu lỗi, giữ lại nội dung chỉnh sửa để tránh mất công.
+
+### Chế độ đọc sách
+
+Chuyển sang **Chế độ đọc sách** và chọn chỉ tiếng Việt, song ngữ hoặc chỉ tiếng Anh. Có thể điều chỉnh kiểu chữ và cỡ chữ. Chế độ đọc phục vụ kiểm tra nội dung, không phải trình biên tập bố cục in ấn đầy đủ.
+
+Với bài báo PDF, đặc biệt kiểm tra thứ tự hai cột, caption hình/bảng, công thức, chú thích và tài liệu tham khảo.
+
+## 9. Xuất sách
+
+1. Chờ dịch và chỉnh sửa xong; nên tạm dừng worker trước khi xuất để tránh bản xuất chứa dữ liệu từ các thời điểm khác nhau.
+2. Mở chức năng xuất sách và chọn định dạng.
+3. Tải file, mở bằng ứng dụng đọc tương ứng và kiểm tra vài chương, ảnh, dấu tiếng Việt và mục lục.
+
+| Định dạng | Phù hợp khi |
+| --- | --- |
+| EPUB tiếng Việt | Đọc bằng phần mềm hoặc thiết bị hỗ trợ EPUB. |
+| EPUB song ngữ | Đối chiếu nguồn và bản dịch. |
+| DOCX | Tiếp tục biên tập trong trình soạn thảo Word. |
+| HTML | Đọc bằng trình duyệt hoặc in ra PDF. |
+| TXT | Lấy nội dung văn bản đơn giản. |
+
+Để tạo PDF, mở HTML đã tải về, dùng Ctrl+P hoặc Cmd+P, chọn lưu PDF và kiểm tra khổ giấy/lề trước khi lưu.
+
+Các đoạn chưa có bản dịch có thể được xuất bằng bản gốc, tùy nhánh exporter. Kiểm tra nội dung thay vì chỉ dựa vào việc xuất thành công. Bản xuất không tự cập nhật sau khi sửa; cần xuất lại. File tạm xuất được đặt theo tên sách và định dạng, nên dự án trùng tên có thể ghi đè file xuất trên server; tải và đổi tên bản cần giữ.
+
+## 10. Dữ liệu và sao lưu
+
+~~~text
+data/
+  settings.json            Cấu hình và API key dạng văn bản
+  uploads/                 File nguồn đã upload
+  projects/<project_id>/
+    meta.json              Thông tin dự án và thống kê
+    glossary.json          Nhân vật, thuật ngữ, văn phong
+    chapters/*.json        Nội dung gốc, bản dịch, trạng thái
+    images/                Ảnh trích xuất nếu có
+  exports/                 Các file xuất
+~~~
+
+### Sao lưu
+
+1. Tạm dừng dịch và chờ kết thúc, sau đó tắt server.
+2. Sao chép toàn bộ thư mục data sang vị trí riêng an toàn để giữ cả nguồn, ảnh và đường dẫn liên quan.
+3. Bảo vệ settings.json vì chứa key; không gửi bản sao nguyên trạng cho người khác.
+4. Khi khôi phục, tắt server, sao lưu dữ liệu hiện tại rồi đưa dữ liệu cũ về đúng thư mục.
+
+Một số đường dẫn nguồn/ảnh được lưu dạng tuyệt đối: chuyển sang máy hoặc thư mục khác có thể cần điều chỉnh, không bảo đảm sao chép data là đủ cho mọi bản xuất.
+
+Xóa dự án là thao tác không có thùng rác tích hợp; chỉ xóa khi worker đã dừng. Các file đã tải về máy hoặc file trong exports không nên được coi là đã tự xóa theo dự án.
+
+.gitignore loại dữ liệu cục bộ, settings và .venv khỏi Git. Trước khi chia sẻ hoặc push, vẫn kiểm tra các file đang được theo dõi; ignore không gỡ một bí mật đã từng commit.
+
+## 11. Xử lý sự cố
+
+| Hiện tượng | Cách kiểm tra |
+| --- | --- |
+| Không tìm thấy python/py | Cài Python, thêm PATH và mở terminal mới; hoặc dùng đường dẫn Python trong .venv. |
+| ModuleNotFoundError | Cài requirements.txt bằng đúng Python dùng chạy main.py. |
+| Trình duyệt không mở | Đọc URL trong terminal; kiểm tra server chưa thoát do lỗi. |
+| Cổng 8000 đã bị chiếm | Dùng địa chỉ cổng thay thế do launcher in ra. |
+| Upload bị từ chối | Kiểm tra định dạng, file không rỗng và không quá 100 MiB; chuyển DOC sang DOCX. |
+| PDF không có chữ hoặc sai thứ tự | Kiểm tra lớp văn bản/OCR và thử nguồn EPUB/DOCX nếu có. |
+| API trả 401/403 | Kiểm tra key, quyền tài khoản và endpoint; không gửi key trong báo lỗi. |
+| Model không tìm thấy | Nhập ID model hợp lệ cho tài khoản; tên sẵn trong giao diện không phải cam kết khả dụng. |
+| Quota/rate limit | Đọc log, chờ cooldown hoặc kiểm tra hạn mức với nhà cung cấp; tránh bấm thử liên tục. |
+| Chọn OpenAI nhưng gọi sai server | Xem mục giới hạn cấu hình OpenAI và kiểm tra base_url đã lưu. |
+| Ollama không kết nối | Kiểm tra dịch vụ, endpoint và model đã tải; model không đi kèm project. |
+| Không sửa/xóa được khi đang dừng | Chờ request AI hiện tại kết thúc và worker về sẵn sàng. |
+| Đoạn vẫn là tiếng Anh | Kiểm tra log và dấu fallback; rà soát hoặc dịch lại sau khi sửa cấu hình. |
+| Đổi glossary mà bản dịch không đổi | Glossary mới áp dụng cho phiên dịch sau, không tự sửa kết quả cũ. |
+| Xuất sách thiếu ảnh hoặc lỗi công thức | Kiểm tra file nguồn và thư mục ảnh; xem bằng trình đọc khác và so với nguồn. |
+
+Khi báo lỗi, cung cấp hệ điều hành, phiên bản Python, định dạng đầu vào, các bước tái hiện và log đã xóa key/nội dung riêng tư. Ưu tiên file mẫu nhỏ không chứa tài liệu nhạy cảm.
+
+## 12. Bảo mật và giới hạn
+
+- Thiết kế cho **một người dùng, một tiến trình server, chạy cục bộ**. Chưa có đăng nhập/phân quyền; không public ra Internet hoặc mở port LAN khi chưa bổ sung bảo vệ.
+- API key lưu dạng plaintext trong data/settings.json và được API cấu hình trả cho giao diện. CORS không thay thế xác thực.
+- Dịch vụ từ xa nhận nội dung các đoạn dịch và ngữ cảnh/glossary được gửi kèm. Kiểm tra yêu cầu bảo mật của tài liệu trước khi sử dụng.
+- Nhánh Gemini có fallback sang dịch vụ khác; chế độ dùng thử cũng cần mạng. Không bảo đảm xử lý offline trừ khi đã kiểm tra toàn bộ luồng đang dùng.
+- Ghi JSON nguyên tử bảo vệ từng file khỏi ghi dở, không phải giao dịch nhiều file hoặc khóa liên tiến trình. Sao lưu vẫn cần thiết.
+- Chưa có bảo đảm OCR, độ chính xác khoa học, giữ bố cục tuyệt đối hoặc chất lượng văn học. Cần người biên tập rà soát.
+- Chỉ xử lý và chia sẻ những tài liệu bạn có quyền sử dụng. Không suy ra có giấy phép MIT từ README cũ; repository hiện chưa có file LICENSE xác định giấy phép dự án.
+
+## 13. Phát triển và kiểm thử
+
+### Cấu trúc mã nguồn
+
+~~~text
+main.py                      Launcher server và trình duyệt
+run.bat                      Launcher Windows
+core/parser.py               Đọc file và tạo cấu trúc sách
+core/chunker.py              Chia đoạn thành chunk dịch
+core/translator.py           Gọi backend dịch
+core/glossary.py              Quy tắc nhân vật và thuật ngữ
+core/exporter.py              Xuất bản dịch
+server/app.py                HTTP API và phục vụ giao diện
+server/database.py           Lưu/đọc JSON
+server/translator_worker.py  Điều phối worker và tiến độ
+web/                         HTML, CSS, JavaScript
+~~~
+
+### Test offline, không dùng key thật
+
+~~~powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m unittest test_server_endpoints -v
+~~~
+
+Trên macOS/Linux, thay đường dẫn Python bằng .venv/bin/python.
+
+Bộ test dùng thư mục tạm và không gọi dịch vụ AI. Phạm vi gồm API cơ bản, giữ số từ sau chỉnh sửa, lưu JSON nguyên tử, đường dẫn không hợp lệ, cleanup upload và trạng thái worker đang dừng. Script test_verification.py cũ có luồng dịch qua mạng: **không dùng làm bài test offline mặc định**.
+
+Kiểm tra cú pháp bổ sung:
+
+~~~powershell
+.\.venv\Scripts\python.exe -m compileall -q core server main.py test_server_endpoints.py
+node --check web/app.js
+git diff --check
+~~~
+
+Lệnh node ở trên chỉ dành cho kiểm tra JavaScript nếu có Node.js, không phải yêu cầu để chạy ứng dụng. Xem thêm [DEVELOPMENT.md](DEVELOPMENT.md).
+
+### Kết quả kiểm chứng trong lần nâng cấp
+
+10 test hồi quy offline đã đạt trên Windows; Python và JavaScript đã qua kiểm tra cú pháp. Có cảnh báo deprecated từ TestClient/thư viện HTTP trong môi trường kiểm thử. Kết quả này không chứng nhận kết nối thật tới từng provider, giá/quota/model hiện hành hoặc độ trung thực của mọi định dạng xuất sách.
