@@ -1,6 +1,6 @@
 /**
  * AI Book Translator Pro - Frontend Application Controller
- * Handles real-time SSE updates, dual-view studio, inline editing, glossary & export.
+ * Handles real-time polling updates, dual-view studio, inline editing, glossary & export.
  */
 
 class BookTranslatorApp {
@@ -13,8 +13,10 @@ class BookTranslatorApp {
         this.isTranslating = false;
         this.eventSource = null;
         this.fontSize = 18;
-        this.readerFont = 'merriweather';
+        this.readerFont = 'font-serif';
         this.readerDisplayMode = 'vi-only';
+        this._modalStack = [];      // focus-restore stack
+        this._inertStates = new Map();
 
         this.initElements();
         this.bindEvents();
@@ -34,10 +36,26 @@ class BookTranslatorApp {
         this.btnExportModal = document.getElementById('btnExportModal');
         this.btnSettingsModal = document.getElementById('btnSettingsModal');
 
+        // globalProgressBox ARIA
+        const gpb = document.getElementById('globalProgressBox');
+        if (gpb) {
+            gpb.setAttribute('role', 'progressbar');
+            gpb.setAttribute('aria-valuemin', '0');
+            gpb.setAttribute('aria-valuemax', '100');
+            gpb.setAttribute('aria-valuenow', '0');
+            gpb.setAttribute('aria-label', 'Tiến độ dịch sách');
+        }
+
         // Sidebar Left
         this.chapterCountBadge = document.getElementById('chapterCountBadge');
         this.chapterSearchInput = document.getElementById('chapterSearchInput');
         this.chaptersList = document.getElementById('chaptersList');
+
+        // New chapter drawer elements (expected in HTML)
+        this.sidebarChapters = document.getElementById('sidebarChapters');
+        this.btnToggleChapters = document.getElementById('btnToggleChapters');
+        this.btnCloseChapters = document.getElementById('btnCloseChapters');
+        this.panelBackdrop = document.getElementById('panelBackdrop');
 
         // Center Views
         this.tabStudio = document.getElementById('tabStudio');
@@ -50,6 +68,11 @@ class BookTranslatorApp {
         this.readerView = document.getElementById('readerView');
         this.studioParagraphs = document.getElementById('studioParagraphs');
         this.readerBody = document.getElementById('readerBody');
+
+        // Set initial font class on readerBody
+        if (this.readerBody) {
+            this.readerBody.className = 'reader-body font-serif';
+        }
 
         // Reader Controls
         this.btnFontDec = document.getElementById('btnFontDec');
@@ -69,6 +92,15 @@ class BookTranslatorApp {
         this.btnAddTerm = document.getElementById('btnAddTerm');
         this.customInstructions = document.getElementById('customInstructions');
         this.btnSaveGlossary = document.getElementById('btnSaveGlossary');
+
+        // sidebarRight initially collapsed
+        if (this.sidebarRight) {
+            this.sidebarRight.classList.add('collapsed');
+        }
+        // ARIA for toggle button
+        if (this.btnToggleRightSidebar) {
+            this.btnToggleRightSidebar.setAttribute('aria-expanded', 'false');
+        }
 
         // Footer & Console
         this.statusIndicator = document.getElementById('statusIndicator');
@@ -112,6 +144,62 @@ class BookTranslatorApp {
         this.btnCancelDelete = document.getElementById('btnCancelDelete');
         this.btnConfirmDeleteAction = document.getElementById('btnConfirmDeleteAction');
         this.deleteProjectTitleDisplay = document.getElementById('deleteProjectTitleDisplay');
+
+        // Textbook Modal Elements
+        this.btnTextbookModal = document.getElementById('btnTextbookModal');
+        this.textbookModal = document.getElementById('textbookModal');
+        this.btnCloseTextbookModal = document.getElementById('btnCloseTextbookModal');
+        this.btnCancelTextbook = document.getElementById('btnCancelTextbook');
+        this.btnStartConvertTextbook = document.getElementById('btnStartConvertTextbook');
+        this.textbookExistingSelect = document.getElementById('textbookExistingSelect');
+        this.textbookFileInput = document.getElementById('textbookFileInput');
+        this.textbookSelectedFilename = document.getElementById('textbookSelectedFilename');
+        this.textbookProgressContainer = document.getElementById('textbookProgressContainer');
+        this.textbookStatusTitle = document.getElementById('textbookStatusTitle');
+        this.textbookPercentDisplay = document.getElementById('textbookPercentDisplay');
+        this.textbookProgressBar = document.getElementById('textbookProgressBar');
+        this.textbookMessageDisplay = document.getElementById('textbookMessageDisplay');
+        this.textbookSuccessBox = document.getElementById('textbookSuccessBox');
+        this.textbookSuccessTitle = document.getElementById('textbookSuccessTitle');
+        this.textbookSuccessMeta = document.getElementById('textbookSuccessMeta');
+        this.btnDownloadTextbookEpub = document.getElementById('btnDownloadTextbookEpub');
+        this.btnOpenTextbookReader = document.getElementById('btnOpenTextbookReader');
+        this.textbookActionFooter = document.getElementById('textbookActionFooter');
+
+        // textbookProgressContainer ARIA
+        if (this.textbookProgressContainer) {
+            this.textbookProgressContainer.setAttribute('role', 'progressbar');
+            this.textbookProgressContainer.setAttribute('aria-valuemin', '0');
+            this.textbookProgressContainer.setAttribute('aria-valuemax', '100');
+            this.textbookProgressContainer.setAttribute('aria-valuenow', '0');
+            this.textbookProgressContainer.setAttribute('aria-label', 'Tiến độ chuyển đổi giáo trình');
+        }
+
+        // Apply role=dialog + aria-modal to all modal cards
+        this._initModalARIA();
+    }
+
+    _initModalARIA() {
+        const pairs = [
+            [this.uploadModal,        'uploadModalHeading'],
+            [this.settingsModal,      'settingsModalHeading'],
+            [this.exportModal,        'exportModalHeading'],
+            [this.deleteConfirmModal, 'deleteModalHeading'],
+            [this.textbookModal,      'textbookModalHeading'],
+        ];
+        pairs.forEach(([modal, hid]) => {
+            if (!modal) return;
+            const card = modal.querySelector('.modal-card');
+            if (!card) return;
+            card.setAttribute('role', 'dialog');
+            card.setAttribute('aria-modal', 'true');
+            card.setAttribute('tabindex', '-1');
+            const heading = card.querySelector('.modal-header h2, .modal-header h3');
+            if (heading) {
+                if (!heading.id) heading.id = hid;
+                card.setAttribute('aria-labelledby', heading.id);
+            }
+        });
     }
 
     bindEvents() {
@@ -132,6 +220,39 @@ class BookTranslatorApp {
         }
         if (this.btnConfirmDeleteAction) {
             this.btnConfirmDeleteAction.addEventListener('click', () => this.executeDeleteProject());
+        }
+
+        // Textbook Modal Events
+        if (this.btnTextbookModal) {
+            this.btnTextbookModal.addEventListener('click', () => {
+                this.resetTextbookModal();
+                this.showModal(this.textbookModal);
+            });
+        }
+        if (this.btnCloseTextbookModal) {
+            this.btnCloseTextbookModal.addEventListener('click', () => this.hideModal(this.textbookModal));
+        }
+        if (this.btnCancelTextbook) {
+            this.btnCancelTextbook.addEventListener('click', () => this.hideModal(this.textbookModal));
+        }
+        if (this.textbookFileInput) {
+            this.textbookFileInput.addEventListener('change', (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    this.textbookSelectedFilename.textContent = `Đã chọn: ${e.target.files[0].name}`;
+                    if (this.textbookExistingSelect) this.textbookExistingSelect.value = '';
+                }
+            });
+        }
+        if (this.textbookExistingSelect) {
+            this.textbookExistingSelect.addEventListener('change', (e) => {
+                if (e.target.value) {
+                    this.textbookSelectedFilename.textContent = `Đã chọn: ${e.target.value}`;
+                    if (this.textbookFileInput) this.textbookFileInput.value = '';
+                }
+            });
+        }
+        if (this.btnStartConvertTextbook) {
+            this.btnStartConvertTextbook.addEventListener('click', () => this.startTextbookConversion());
         }
 
         // Translation control buttons
@@ -158,16 +279,63 @@ class BookTranslatorApp {
         // Search chapters
         this.chapterSearchInput.addEventListener('input', (e) => this.filterChapters(e.target.value));
 
-        // View tabs
+        // View tabs — ARIA selected state
         this.tabStudio.addEventListener('click', () => this.switchView('studio'));
         this.tabReader.addEventListener('click', () => this.switchView('reader'));
 
-        // Right sidebar toggle
+        // Right sidebar toggle — ARIA expanded
         this.btnToggleRightSidebar.addEventListener('click', () => {
-            this.sidebarRight.classList.toggle('collapsed');
+            const collapsed = this.sidebarRight.classList.toggle('collapsed');
+            this.btnToggleRightSidebar.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            this._updateBackdrop();
         });
         this.btnCloseRightSidebar.addEventListener('click', () => {
             this.sidebarRight.classList.add('collapsed');
+            this.btnToggleRightSidebar.setAttribute('aria-expanded', 'false');
+            this._updateBackdrop();
+        });
+
+        // Chapter drawer (left sidebar — new IDs)
+        if (this.btnToggleChapters) {
+            this.btnToggleChapters.addEventListener('click', () => {
+                const open = this.sidebarChapters.classList.toggle('open');
+                this.btnToggleChapters.setAttribute('aria-expanded', open ? 'true' : 'false');
+                this._updateBackdrop();
+            });
+        }
+        if (this.btnCloseChapters) {
+            this.btnCloseChapters.addEventListener('click', () => this._closeChapterDrawer());
+        }
+
+        window.addEventListener('resize', () => this._updateBackdrop());
+
+        // Backdrop
+        if (this.panelBackdrop) {
+            this.panelBackdrop.addEventListener('click', () => {
+                this._closeChapterDrawer();
+                this.sidebarRight.classList.add('collapsed');
+                this.btnToggleRightSidebar.setAttribute('aria-expanded', 'false');
+                this._updateBackdrop();
+            });
+        }
+
+        // Escape: close topmost modal, then drawers
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            if (this._modalStack.length > 0) {
+                const top = this._modalStack[this._modalStack.length - 1];
+                this.hideModal(top);
+                return;
+            }
+            if (this.sidebarChapters && this.sidebarChapters.classList.contains('open')) {
+                this._closeChapterDrawer();
+                return;
+            }
+            if (this.sidebarRight && !this.sidebarRight.classList.contains('collapsed')) {
+                this.sidebarRight.classList.add('collapsed');
+                this.btnToggleRightSidebar.setAttribute('aria-expanded', 'false');
+                this._updateBackdrop();
+            }
         });
 
         // Reader controls
@@ -179,9 +347,15 @@ class BookTranslatorApp {
         });
         this.fontToggles.forEach(btn => {
             btn.addEventListener('click', () => {
-                this.fontToggles.forEach(b => b.classList.remove('active'));
+                this.fontToggles.forEach(b => {
+                    b.classList.remove('active');
+                    b.setAttribute('aria-pressed', 'false');
+                });
                 btn.classList.add('active');
-                this.readerFont = btn.dataset.font;
+                btn.setAttribute('aria-pressed', 'true');
+                // Map data-font to CSS class: merriweather/serif -> font-serif, sans -> font-sans
+                const df = btn.dataset.font;
+                this.readerFont = (df === 'merriweather' || df === 'serif') ? 'font-serif' : 'font-sans';
                 this.updateReaderFontClass();
             });
         });
@@ -236,7 +410,7 @@ class BookTranslatorApp {
         }
         this.btnSaveSettings.addEventListener('click', () => this.saveSettings());
 
-        // File Upload Dropzone
+        // File Upload Dropzone (drag/drop preserved)
         this.bookFileInput.addEventListener('change', (e) => {
             if (e.target.files && e.target.files[0]) {
                 this.handleFileUpload(e.target.files[0]);
@@ -265,7 +439,24 @@ class BookTranslatorApp {
         await this.loadProjects();
     }
 
-    // --- LOGS & SSE ---
+    // --- Drawer helpers ---
+
+    _closeChapterDrawer() {
+        if (this.sidebarChapters) this.sidebarChapters.classList.remove('open');
+        if (this.btnToggleChapters) this.btnToggleChapters.setAttribute('aria-expanded', 'false');
+        this._updateBackdrop();
+    }
+
+    _updateBackdrop() {
+        if (!this.panelBackdrop) return;
+        const w = window.innerWidth;
+        const chapOpen = this.sidebarChapters && this.sidebarChapters.classList.contains('open');
+        const rightOpen = this.sidebarRight && !this.sidebarRight.classList.contains('collapsed');
+        const show = (w <= 900 && chapOpen) || (w <= 1200 && rightOpen);
+        this.panelBackdrop.classList.toggle('hidden', !show);
+    }
+
+    // --- LOGS ---
 
     appendLog(level, text) {
         const line = document.createElement('div');
@@ -279,10 +470,10 @@ class BookTranslatorApp {
         this.logCounterBadge.textContent = count;
     }
 
-    startStatusPolling(projectId) {
-        if (this.pollTimer) {
-            clearInterval(this.pollTimer);
-        }
+    // --- SSE / STATUS POLLING ---
+
+    startStatusPolling(_projectId) {
+        if (this.pollTimer) clearInterval(this.pollTimer);
         this.lastPollTimestamp = 0;
 
         const pollFunc = async () => {
@@ -302,9 +493,7 @@ class BookTranslatorApp {
 
                 // 2. Add new logs
                 if (data.logs && data.logs.length > 0) {
-                    for (const l of data.logs) {
-                        this.appendLog(l.level || 'info', l.text);
-                    }
+                    for (const l of data.logs) this.appendLog(l.level || 'info', l.text);
                 }
 
                 // 3. Update overall progress
@@ -320,12 +509,10 @@ class BookTranslatorApp {
                         chapBadge.className = data.chapter_progress >= 100 ? 'chapter-badge badge-done' : 'chapter-badge badge-progress';
                     }
                     const miniFill = document.getElementById(`chap_fill_${data.chapter_id}`);
-                    if (miniFill) {
-                        miniFill.style.width = `${data.chapter_progress}%`;
-                    }
+                    if (miniFill) miniFill.style.width = `${data.chapter_progress}%`;
                 }
 
-                // 5. Update paragraph editors in real time!
+                // 5. Update paragraph editors — class flash, no inline color
                 if (data.updated_paragraphs && data.updated_paragraphs.length > 0) {
                     for (const p of data.updated_paragraphs) {
                         if (this.currentChapterId === p.chapter_id) {
@@ -335,9 +522,8 @@ class BookTranslatorApp {
                                 const chip = pEl.querySelector('.para-status-chip');
                                 if (editor && editor.innerText !== p.text) {
                                     editor.innerText = p.text;
-                                    editor.style.transition = 'background 0.3s ease';
-                                    editor.style.background = 'rgba(16, 185, 129, 0.25)';
-                                    setTimeout(() => { editor.style.background = 'transparent'; }, 800);
+                                    editor.classList.add('editor-updated');
+                                    setTimeout(() => editor.classList.remove('editor-updated'), 800);
                                 }
                                 if (chip) {
                                     chip.className = 'para-status-chip chip-done';
@@ -352,7 +538,6 @@ class BookTranslatorApp {
             }
         };
 
-        // Poll immediately and every 1.5s
         pollFunc();
         this.pollTimer = setInterval(pollFunc, 1500);
     }
@@ -378,12 +563,12 @@ class BookTranslatorApp {
             alert('Vui lòng chọn một sách hoặc bài báo trong danh sách để xóa.');
             return;
         }
-        const projTitle = this.currentProject?.title || 
-            (this.projectSelect && this.projectSelect.selectedIndex >= 0 ? this.projectSelect.options[this.projectSelect.selectedIndex].text : 'Dự án đã chọn');
-        
-        if (this.deleteProjectTitleDisplay) {
-            this.deleteProjectTitleDisplay.textContent = projTitle;
-        }
+        const projTitle = this.currentProject?.title ||
+            (this.projectSelect && this.projectSelect.selectedIndex >= 0
+                ? this.projectSelect.options[this.projectSelect.selectedIndex].text
+                : 'Dự án đã chọn');
+
+        if (this.deleteProjectTitleDisplay) this.deleteProjectTitleDisplay.textContent = projTitle;
         if (this.deleteConfirmModal) {
             this.showModal(this.deleteConfirmModal);
         } else {
@@ -393,9 +578,7 @@ class BookTranslatorApp {
         }
     }
 
-    deleteCurrentProject() {
-        this.confirmDeleteProject();
-    }
+    deleteCurrentProject() { this.confirmDeleteProject(); }
 
     async executeDeleteProject() {
         const projId = this.currentProjectId || (this.projectSelect ? this.projectSelect.value : null);
@@ -403,34 +586,25 @@ class BookTranslatorApp {
 
         const projTitle = this.currentProject?.title || 'dự án';
         const confirmBtn = this.btnConfirmDeleteAction || document.getElementById('btnConfirmDeleteAction');
-        const origBtnText = confirmBtn ? confirmBtn.innerHTML : '';
+        const origBtnText = confirmBtn ? confirmBtn.textContent : '';
 
         if (confirmBtn) {
             confirmBtn.disabled = true;
-            confirmBtn.innerHTML = '⏳ Đang xóa...';
+            confirmBtn.textContent = 'Đang xóa...';
         }
 
         try {
-            if (this.pollTimer) {
-                clearInterval(this.pollTimer);
-                this.pollTimer = null;
-            }
+            if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
 
-            const res = await fetch(`/api/projects/${projId}`, {
-                method: 'DELETE'
-            });
-
+            const res = await fetch(`/api/projects/${projId}`, { method: 'DELETE' });
             if (!res.ok) {
                 const errData = await res.json().catch(() => ({}));
                 throw new Error(errData.detail || 'Không thể xóa dự án');
             }
 
             this.appendLog('info', `Đã xóa thành công bài báo/sách: "${projTitle}".`);
+            if (this.deleteConfirmModal) this.hideModal(this.deleteConfirmModal);
 
-            if (this.deleteConfirmModal) {
-                this.hideModal(this.deleteConfirmModal);
-            }
-            
             // Reset current state
             this.currentProjectId = null;
             this.currentProject = null;
@@ -443,7 +617,6 @@ class BookTranslatorApp {
             this.studioParagraphs.innerHTML = '<div class="empty-placeholder">Chọn một chương để xem và chỉnh sửa bản dịch song ngữ</div>';
             this.readerBody.innerHTML = '<div class="empty-placeholder">Nội dung chương sẽ hiển thị tại đây khi được chọn.</div>';
 
-            // Reload projects list
             await this.loadProjects();
         } catch (e) {
             alert(`Lỗi khi xóa: ${e.message}`);
@@ -451,7 +624,7 @@ class BookTranslatorApp {
         } finally {
             if (confirmBtn) {
                 confirmBtn.disabled = false;
-                confirmBtn.innerHTML = origBtnText || '🗑️ Xóa Vĩnh Viễn';
+                confirmBtn.textContent = origBtnText || 'Xóa vĩnh viễn';
             }
         }
     }
@@ -475,10 +648,7 @@ class BookTranslatorApp {
                 this.projectSelect.appendChild(opt);
             }
 
-            // Auto-select first project
-            if (projects.length > 0) {
-                this.selectProject(projects[0].id);
-            }
+            if (projects.length > 0) this.selectProject(projects[0].id);
         } catch (e) {
             this.appendLog('error', `Lỗi tải danh sách dự án: ${e.message}`);
         }
@@ -501,16 +671,13 @@ class BookTranslatorApp {
             const data = await res.json();
             this.currentProject = data;
 
-            // Update UI headers
             this.projectTitleDisplay.textContent = data.title;
             this.updateGlobalProgress(data.progress_percent);
             this.chapterCountBadge.textContent = data.total_chapters;
             this.updateTranslatingStatus(data.is_translating);
 
-            // Render chapter navigation list
             this.renderChaptersList(data.chapters);
 
-            // Select first chapter
             if (autoSelectFirstChapter && data.chapters.length > 0) {
                 this.selectChapter(data.chapters[0].id);
             }
@@ -523,6 +690,8 @@ class BookTranslatorApp {
         const p = Math.min(100, Math.max(0, percent || 0));
         this.globalPercentDisplay.textContent = `${p}%`;
         this.globalProgressBar.style.width = `${p}%`;
+        const gpb = document.getElementById('globalProgressBox');
+        if (gpb) gpb.setAttribute('aria-valuenow', String(p));
     }
 
     renderChaptersList(chapters) {
@@ -533,10 +702,16 @@ class BookTranslatorApp {
         }
 
         for (const chap of chapters) {
-            const item = document.createElement('div');
+            // <button type="button"> for keyboard operability
+            const item = document.createElement('button');
+            item.type = 'button';
             item.className = `chapter-item ${chap.id === this.currentChapterId ? 'active' : ''}`;
             item.id = `chap_item_${chap.id}`;
-            item.onclick = () => this.selectChapter(chap.id);
+            item.addEventListener('click', () => {
+                this.selectChapter(chap.id);
+                // Close chapter drawer on narrow screens after selection
+                if (window.innerWidth <= 900) this._closeChapterDrawer();
+            });
 
             let badgeClass = 'badge-pending';
             if (chap.progress_percent >= 100) badgeClass = 'badge-done';
@@ -544,7 +719,7 @@ class BookTranslatorApp {
 
             item.innerHTML = `
                 <div class="chapter-title-row">
-                    <span class="chapter-title" title="${chap.title}">${chap.title}</span>
+                    <span class="chapter-title" title="${this.escapeHtml(chap.title)}">${this.escapeHtml(chap.title)}</span>
                     <span id="chap_badge_${chap.id}" class="chapter-badge ${badgeClass}">${chap.progress_percent}%</span>
                 </div>
                 <div class="chapter-mini-bar">
@@ -560,7 +735,7 @@ class BookTranslatorApp {
         const items = this.chaptersList.querySelectorAll('.chapter-item');
         items.forEach(item => {
             const title = item.querySelector('.chapter-title').textContent.toLowerCase();
-            item.style.display = title.includes(q) ? 'flex' : 'none';
+            item.style.display = title.includes(q) ? '' : 'none';
         });
     }
 
@@ -569,11 +744,10 @@ class BookTranslatorApp {
     async selectChapter(chapterId) {
         this.currentChapterId = chapterId;
 
-        // Highlight in left sidebar
         const allItems = this.chaptersList.querySelectorAll('.chapter-item');
-        allItems.forEach(i => i.classList.remove('active'));
+        allItems.forEach(i => { i.classList.remove('active'); i.removeAttribute('aria-current'); });
         const activeItem = document.getElementById(`chap_item_${chapterId}`);
-        if (activeItem) activeItem.classList.add('active');
+        if (activeItem) { activeItem.classList.add('active'); activeItem.setAttribute('aria-current', 'page'); }
 
         try {
             const res = await fetch(`/api/projects/${this.currentProjectId}/chapters/${chapterId}`);
@@ -582,7 +756,6 @@ class BookTranslatorApp {
             this.currentChapter = data;
 
             this.activeChapterTitle.textContent = data.title;
-
             this.renderStudioView();
             this.renderReaderView();
         } catch (e) {
@@ -604,49 +777,79 @@ class BookTranslatorApp {
             row.className = 'para-row';
             row.id = `para_${p.id}`;
 
-            // Image paragraph
+            // Image paragraph — no inline styles; use classes studio-image / image-caption / image-preserved
             if (p.tag === 'img' || p.image_path) {
-                const imgFilename = p.image_path ? p.image_path.split(/[\\/]/).pop() : '';
+                const imgFilename = p.image_path ? p.image_path.split(/[\\\/]/).pop() : '';
                 const imgSrc = imgFilename ? `/api/projects/${this.currentProjectId}/images/${imgFilename}` : '';
                 row.className = 'para-row para-row-image';
-                row.innerHTML = `
-                    <div class="para-en" style="text-align: center; padding: 14px;">
-                        ${imgSrc ? `<img src="${imgSrc}" alt="${this.escapeHtml(p.original_text)}" style="max-width: 90%; max-height: 420px; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.35);" />` : ''}
-                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px; font-weight: 500;">${this.escapeHtml(p.original_text)}</div>
-                    </div>
-                    <div class="para-vi-wrapper" style="display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.02);">
-                        <div style="color: var(--text-muted); font-size: 13px; font-style: italic;">[Hình ảnh / Sơ đồ được giữ nguyên bản gốc]</div>
-                    </div>
-                `;
+
+                const enDiv = document.createElement('div');
+                enDiv.className = 'para-en';
+
+                if (imgSrc) {
+                    const img = document.createElement('img');
+                    img.src = imgSrc;
+                    img.alt = p.original_text || '';
+                    img.className = 'studio-image';
+                    enDiv.appendChild(img);
+                }
+                const capDiv = document.createElement('div');
+                capDiv.className = 'image-caption';
+                capDiv.textContent = p.original_text;
+                enDiv.appendChild(capDiv);
+
+                const viDiv = document.createElement('div');
+                viDiv.className = 'para-vi-wrapper';
+                const preservedDiv = document.createElement('div');
+                preservedDiv.className = 'image-preserved';
+                preservedDiv.textContent = '[Hình anh / So do duoc giu nguyen ban goc]';
+                viDiv.appendChild(preservedDiv);
+
+                row.appendChild(enDiv);
+                row.appendChild(viDiv);
                 frag.appendChild(row);
                 continue;
             }
 
             let chipClass = 'chip-pending';
             let chipText = 'Đang chờ';
-            if (p.status === 'done') {
-                chipClass = 'chip-done';
-                chipText = 'Đã dịch';
-            } else if (p.status === 'edited') {
-                chipClass = 'chip-edited';
-                chipText = 'Đã sửa tay';
-            }
+            if (p.status === 'done') { chipClass = 'chip-done'; chipText = 'Đã dịch'; }
+            else if (p.status === 'edited') { chipClass = 'chip-edited'; chipText = 'Đã sửa tay'; }
 
-            row.innerHTML = `
-                <div class="para-en">${this.escapeHtml(p.original_text)}</div>
-                <div class="para-vi-wrapper">
-                    <div class="para-vi-editor" contenteditable="true" spellcheck="false" data-para-id="${p.id}" placeholder="Đoạn văn bản tiếng Việt...">${this.escapeHtml(p.translated_text || '')}</div>
-                    <div class="para-meta">
-                        <span class="para-status-chip ${chipClass}">${chipText}</span>
-                    </div>
-                </div>
-            `;
+            const enDiv = document.createElement('div');
+            enDiv.className = 'para-en';
+            enDiv.textContent = p.original_text;
 
-            // Inline auto-save when user finishes typing and blurs
-            const editor = row.querySelector('.para-vi-editor');
+            const viWrapper = document.createElement('div');
+            viWrapper.className = 'para-vi-wrapper';
+
+            const editor = document.createElement('div');
+            editor.className = 'para-vi-editor';
+            editor.setAttribute('contenteditable', 'true');
+            editor.setAttribute('spellcheck', 'false');
+            editor.setAttribute('role', 'textbox');
+            editor.setAttribute('aria-label', 'Bản dịch tiếng Việt có thể chỉnh sửa');
+            editor.setAttribute('aria-multiline', 'true');
+            editor.setAttribute('data-para-id', p.id);
+            editor.setAttribute('data-placeholder', 'Đoạn văn bản tiếng Việt…');
+            editor.textContent = p.translated_text || '';
+
+            const metaDiv = document.createElement('div');
+            metaDiv.className = 'para-meta';
+            const chip = document.createElement('span');
+            chip.className = `para-status-chip ${chipClass}`;
+            chip.textContent = chipText;
+            metaDiv.appendChild(chip);
+
+            viWrapper.appendChild(editor);
+            viWrapper.appendChild(metaDiv);
+            row.appendChild(enDiv);
+            row.appendChild(viWrapper);
+
+            // Auto-save on blur (upstream save error preserved)
             editor.addEventListener('blur', (e) => {
                 const newText = e.target.innerText.trim();
-                if (newText !== p.translated_text) {
+                if (newText !== (p.translated_text || '')) {
                     this.saveEditedParagraph(p.id, newText, row);
                 }
             });
@@ -668,12 +871,10 @@ class BookTranslatorApp {
                 const error = await res.json();
                 throw new Error(error.detail || 'Không thể lưu bản dịch');
             }
-            if (res.ok) {
-                const chip = rowEl.querySelector('.para-status-chip');
-                chip.className = 'para-status-chip chip-edited';
-                chip.textContent = 'Đã sửa tay';
-                this.appendLog('info', `Đã lưu đoạn văn chỉnh sửa (${paraId})`);
-            }
+            const chip = rowEl.querySelector('.para-status-chip');
+            chip.className = 'para-status-chip chip-edited';
+            chip.textContent = 'Đã sửa tay';
+            this.appendLog('info', `Đã lưu đoạn văn chỉnh sửa (${paraId})`);
         } catch (e) {
             this.appendLog('error', `Lỗi lưu đoạn văn: ${e.message}`);
         }
@@ -682,28 +883,49 @@ class BookTranslatorApp {
     renderReaderView() {
         this.readerBody.innerHTML = '';
         if (!this.currentChapter || !this.currentChapter.paragraphs.length) {
-            this.readerBody.innerHTML = '<p style="text-align:center; color: var(--text-muted); margin-top: 40px;">Không có nội dung để hiển thị.</p>';
+            const noContent = document.createElement('p');
+            noContent.className = 'reader-notice';
+            noContent.textContent = 'Không có nội dung để hiển thị.';
+            this.readerBody.appendChild(noContent);
             return;
         }
 
-        const isPreamble = ['phần mở đầu / tiêu đề', 'title', 'header'].includes((this.currentChapter.title || '').trim().toLowerCase());
+        const isPreamble = ['phần mở đầu / tiêu đề', 'title', 'header'].includes(
+            (this.currentChapter.title || '').trim().toLowerCase()
+        );
         if (!isPreamble) {
             const titleH2 = document.createElement('h2');
             titleH2.textContent = this.currentChapter.title;
             this.readerBody.appendChild(titleH2);
         }
 
-        const translatedCount = this.currentChapter.paragraphs.filter(p => p.translated_text && p.translated_text.trim()).length;
+        const translatedCount = this.currentChapter.paragraphs.filter(
+            p => p.translated_text && p.translated_text.trim()
+        ).length;
         const isNotTranslated = translatedCount === 0;
 
         if (isNotTranslated && this.readerDisplayMode !== 'en-only') {
             const alertBox = document.createElement('div');
-            alertBox.style.cssText = 'background: rgba(234, 179, 8, 0.12); border: 1px solid rgba(234, 179, 8, 0.35); border-radius: 8px; padding: 18px 24px; margin-bottom: 30px; text-align: center; color: #fde047;';
-            alertBox.innerHTML = `
-                <div style="font-weight: 700; font-size: 15px; margin-bottom: 6px;">⚠️ Chương này chưa được dịch sang tiếng Việt!</div>
-                <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">Bạn đang chọn chế độ xem "Chỉ tiếng Việt", nhưng AI chưa dịch chương này. Hãy chọn các chương đã dịch (như PROLOGUE hoặc CHAPTER ONE ở cột bên trái) hoặc bấm nút dưới đây để AI dịch ngay chương này.</div>
-                <button class="btn btn-primary" onclick="app.startTranslation('${this.currentChapter.id}')" style="margin: 0 auto;">⚡ Dịch ngay chương này (${this.currentChapter.paragraphs.length} đoạn)</button>
-            `;
+            alertBox.className = 'notice reader-notice';
+
+            const titleDiv = document.createElement('div');
+            titleDiv.className = 'notice-title';
+            titleDiv.textContent = 'Chương này chưa được dịch sang tiếng Việt.';
+            alertBox.appendChild(titleDiv);
+
+            const descDiv = document.createElement('div');
+            descDiv.textContent = 'Chương này chưa có bản dịch tiếng Việt. Bạn có thể xem bản gốc hoặc bắt đầu dịch bằng nút bên dưới.';
+            alertBox.appendChild(descDiv);
+
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'notice-actions';
+            const translateBtn = document.createElement('button');
+            translateBtn.type = 'button';
+            translateBtn.className = 'btn btn-primary';
+            translateBtn.textContent = `Dịch chương này (${this.currentChapter.paragraphs.length} đoạn)`;
+            translateBtn.addEventListener('click', () => this.startTranslation(this.currentChapter.id));
+            actionsDiv.appendChild(translateBtn);
+            alertBox.appendChild(actionsDiv);
             this.readerBody.appendChild(alertBox);
         }
 
@@ -715,9 +937,40 @@ class BookTranslatorApp {
         };
 
         const splitCaption = (text) => {
-            const m = (text || '').trim().match(/^(Figure\s*[\d\.\-]+[:\.\-–]|Fig\.?\s*[\d\.\-]+[:\.\-–]|Hình\s*[\d\.\-]+[:\.\-–]|Table\s*[\d\.\-]+[:\.\-–]|Bảng\s*[\d\.\-]+[:\.\-–])\s*(.*)$/i);
+            const m = (text || '').trim().match(
+                /^(Figure\s*[\d\.\-]+[:\.\-–]|Fig\.?\s*[\d\.\-]+[:\.\-–]|Hình\s*[\d\.\-]+[:\.\-–]|Table\s*[\d\.\-]+[:\.\-–]|Bảng\s*[\d\.\-]+[:\.\-–])\s*(.*)$/i
+            );
             if (m) return { label: m[1].trim(), content: m[2].trim() };
             return { label: '', content: text };
+        };
+
+        const makeCaptionEl = (enCap, viCap, extraClass) => {
+            const capDiv = document.createElement('div');
+            capDiv.className = extraClass ? `image-caption ${extraClass}` : 'image-caption';
+
+            if (this.readerDisplayMode === 'bilingual') {
+                const enObj = splitCaption(enCap);
+                const viObj = splitCaption(viCap);
+                const pair = document.createElement('div');
+                pair.className = 'caption-pair';
+
+                const enRow = document.createElement('div');
+                enRow.className = 'caption-en';
+                enRow.innerHTML = `<span class="cap-badge en">EN</span> <strong>${this.escapeHtml(enObj.label)}</strong> ${this.escapeHtml(enObj.content)}`;
+
+                const viRow = document.createElement('div');
+                viRow.className = 'caption-vi';
+                viRow.innerHTML = `<span class="cap-badge vi">VI</span> <strong>${this.escapeHtml(viObj.label)}</strong> ${this.escapeHtml(viObj.content)}`;
+
+                pair.appendChild(enRow);
+                pair.appendChild(viRow);
+                capDiv.appendChild(pair);
+            } else {
+                const targetCap = this.readerDisplayMode === 'en-only' ? enCap : viCap;
+                const obj = splitCaption(targetCap);
+                capDiv.innerHTML = `<strong>${this.escapeHtml(obj.label)}</strong> ${this.escapeHtml(obj.content)}`;
+            }
+            return capDiv;
         };
 
         const paras = this.currentChapter.paragraphs;
@@ -726,55 +979,43 @@ class BookTranslatorApp {
         while (pIdx < paras.length) {
             const p = paras[pIdx];
 
-            // Image in Reader View
+            // Image — use classes reader-image, image-caption
             if (p.tag === 'img' || p.image_path) {
-                const imgFilename = p.image_path ? p.image_path.split(/[\\/]/).pop() : '';
+                const imgFilename = p.image_path ? p.image_path.split(/[\\\/]/).pop() : '';
                 const imgSrc = imgFilename ? `/api/projects/${this.currentProjectId}/images/${imgFilename}` : '';
-                const nextP = (pIdx + 1 < paras.length) ? paras[pIdx + 1] : null;
+                const nextP = pIdx + 1 < paras.length ? paras[pIdx + 1] : null;
                 const captionPara = isCaption(nextP) ? nextP : null;
 
                 if (imgSrc) {
-                    const isTable = captionPara ? (/^(?:Table|Bảng)\b/i.test(captionPara.original_text) || /^(?:Table|Bảng)\b/i.test(captionPara.translated_text) || p.id.includes('tab')) : false;
-
-                    let capHtml = '';
-                    if (captionPara) {
-                        const enCap = (captionPara.original_text || '').trim();
-                        const viCap = (captionPara.translated_text || '').trim() || enCap;
-                        if (this.readerDisplayMode === 'bilingual') {
-                            const enObj = splitCaption(enCap);
-                            const viObj = splitCaption(viCap);
-                            capHtml = `
-                                <div class="caption-pair">
-                                    <div class="caption-en"><span class="cap-badge en">EN</span> <strong>${this.escapeHtml(enObj.label)}</strong> ${this.escapeHtml(enObj.content)}</div>
-                                    <div class="caption-vi"><span class="cap-badge vi">VI</span> <strong>${this.escapeHtml(viObj.label)}</strong> ${this.escapeHtml(viObj.content)}</div>
-                                </div>
-                            `;
-                        } else if (this.readerDisplayMode === 'en-only') {
-                            const enObj = splitCaption(enCap);
-                            capHtml = `<strong>${this.escapeHtml(enObj.label)}</strong> ${this.escapeHtml(enObj.content)}`;
-                        } else {
-                            const viObj = splitCaption(viCap);
-                            capHtml = `<strong>${this.escapeHtml(viObj.label)}</strong> ${this.escapeHtml(viObj.content)}`;
-                        }
-                    }
+                    const isTable = captionPara
+                        ? (/^(?:Table|Bảng)\b/i.test(captionPara.original_text) ||
+                           /^(?:Table|Bảng)\b/i.test(captionPara.translated_text) ||
+                           p.id.includes('tab'))
+                        : false;
 
                     const card = document.createElement('div');
                     card.className = isTable ? 'academic-table-block' : 'academic-figure';
 
-                    const imgHtml = `
-                        <div class="${isTable ? 'table-image-wrapper' : 'figure-image-wrapper'}">
-                            <img src="${imgSrc}" alt="${this.escapeHtml(p.original_text)}" style="max-width: 100%; max-height: 540px; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.25);" />
-                        </div>
-                    `;
+                    const wrapper = document.createElement('div');
+                    wrapper.className = isTable ? 'table-image-wrapper' : 'figure-image-wrapper';
+                    const img = document.createElement('img');
+                    img.src = imgSrc;
+                    img.alt = p.original_text || '';
+                    img.className = 'reader-image';
+                    wrapper.appendChild(img);
 
-                    if (isTable) {
-                        card.innerHTML = `${captionPara ? `<div class="table-caption">${capHtml}</div>` : ''}${imgHtml}`;
+                    if (captionPara) {
+                        const enCap = (captionPara.original_text || '').trim();
+                        const viCap = (captionPara.translated_text || '').trim() || enCap;
+                        const capEl = makeCaptionEl(enCap, viCap, isTable ? 'table-caption' : 'figure-caption');
+                        if (isTable) { card.appendChild(capEl); card.appendChild(wrapper); }
+                        else { card.appendChild(wrapper); card.appendChild(capEl); }
                     } else {
-                        card.innerHTML = `${imgHtml}${captionPara ? `<div class="figure-caption">${capHtml}</div>` : ''}`;
+                        card.appendChild(wrapper);
                     }
 
                     this.readerBody.appendChild(card);
-                    pIdx += (captionPara ? 2 : 1);
+                    pIdx += captionPara ? 2 : 1;
                     continue;
                 }
             }
@@ -783,39 +1024,28 @@ class BookTranslatorApp {
             if (isCaption(p)) {
                 const enCap = (p.original_text || '').trim();
                 const viCap = (p.translated_text || '').trim() || enCap;
-                const cDiv = document.createElement('div');
-                cDiv.className = 'table-caption';
-                cDiv.style.margin = '16px auto';
-                if (this.readerDisplayMode === 'bilingual') {
-                    const enObj = splitCaption(enCap);
-                    const viObj = splitCaption(viCap);
-                    cDiv.innerHTML = `
-                        <div class="caption-pair">
-                            <div class="caption-en"><span class="cap-badge en">EN</span> <strong>${this.escapeHtml(enObj.label)}</strong> ${this.escapeHtml(enObj.content)}</div>
-                            <div class="caption-vi"><span class="cap-badge vi">VI</span> <strong>${this.escapeHtml(viObj.label)}</strong> ${this.escapeHtml(viObj.content)}</div>
-                        </div>
-                    `;
-                } else {
-                    const targetCap = this.readerDisplayMode === 'en-only' ? enCap : viCap;
-                    const obj = splitCaption(targetCap);
-                    cDiv.innerHTML = `<strong>${this.escapeHtml(obj.label)}</strong> ${this.escapeHtml(obj.content)}`;
-                }
-                this.readerBody.appendChild(cDiv);
+                const capEl = makeCaptionEl(enCap, viCap, 'table-caption');
+                this.readerBody.appendChild(capEl);
                 pIdx += 1;
                 continue;
             }
 
-            // Footnotes (∗, †, ‡, *)
-            const isFootnote = (p.original_text || '').trim().startsWith(('∗', '†', '‡', '*'));
+            // Footnotes (*, †, ‡)
+            const firstChar = (p.original_text || '').trim()[0];
+            const isFootnote = firstChar === '*' || firstChar === '∗' || firstChar === '†' || firstChar === '‡';
             if (isFootnote) {
                 const fnDiv = document.createElement('div');
                 fnDiv.className = 'academic-footnote';
                 const hasVi = p.translated_text && p.translated_text.trim();
                 if (this.readerDisplayMode === 'bilingual') {
-                    fnDiv.innerHTML = `
-                        <div style="color: var(--text-muted); font-size: 0.88em; font-style: italic; margin-bottom: 3px;">${this.escapeHtml(p.original_text)}</div>
-                        <div style="font-size: 0.95em;">${this.escapeHtml(p.translated_text || '')}</div>
-                    `;
+                    const enSpan = document.createElement('div');
+                    enSpan.className = 'fn-en';
+                    enSpan.textContent = p.original_text;
+                    const viSpan = document.createElement('div');
+                    viSpan.className = 'fn-vi';
+                    viSpan.textContent = p.translated_text || '';
+                    fnDiv.appendChild(enSpan);
+                    fnDiv.appendChild(viSpan);
                 } else if (this.readerDisplayMode === 'en-only') {
                     fnDiv.textContent = p.original_text;
                 } else {
@@ -832,10 +1062,24 @@ class BookTranslatorApp {
             if (this.readerDisplayMode === 'bilingual') {
                 const pair = document.createElement('div');
                 pair.className = isHeading ? 'reader-bilingual-pair reader-heading-pair' : 'reader-bilingual-pair';
-                pair.innerHTML = `
-                    <div class="reader-bilingual-en ${isHeading ? 'heading-en' : ''}">${this.escapeHtml(p.original_text)}</div>
-                    <div class="reader-bilingual-vi ${isHeading ? 'heading-vi' : ''}">${hasVi ? this.escapeHtml(p.translated_text) : '<em style="color: var(--text-dim); font-size: 0.9em;">[Đoạn này chưa dịch]</em>'}</div>
-                `;
+
+                const enDiv = document.createElement('div');
+                enDiv.className = isHeading ? 'reader-bilingual-en heading-en' : 'reader-bilingual-en';
+                enDiv.textContent = p.original_text;
+
+                const viDiv = document.createElement('div');
+                viDiv.className = isHeading ? 'reader-bilingual-vi heading-vi' : 'reader-bilingual-vi';
+                if (hasVi) {
+                    viDiv.textContent = p.translated_text;
+                } else {
+                    const em = document.createElement('em');
+                    em.className = 'not-translated';
+                    em.textContent = '[Đoạn này chưa dịch]';
+                    viDiv.appendChild(em);
+                }
+
+                pair.appendChild(enDiv);
+                pair.appendChild(viDiv);
                 this.readerBody.appendChild(pair);
             } else if (this.readerDisplayMode === 'en-only') {
                 const pEl = document.createElement(isHeading ? p.tag : 'p');
@@ -847,7 +1091,10 @@ class BookTranslatorApp {
                 if (hasVi) {
                     pEl.textContent = p.translated_text;
                 } else {
-                    pEl.innerHTML = `<em style="color: var(--text-dim); font-size: 0.95em;">[Chưa dịch: "${this.escapeHtml(p.original_text.substring(0, 80))}..."]</em>`;
+                    const em = document.createElement('em');
+                    em.className = 'not-translated';
+                    em.textContent = `[Chưa dịch: "${p.original_text.substring(0, 80)}…"]`;
+                    pEl.appendChild(em);
                 }
                 this.readerBody.appendChild(pEl);
             }
@@ -861,11 +1108,15 @@ class BookTranslatorApp {
         if (viewName === 'studio') {
             this.tabStudio.classList.add('active');
             this.tabReader.classList.remove('active');
+            this.tabStudio.setAttribute('aria-selected', 'true');
+            this.tabReader.setAttribute('aria-selected', 'false');
             this.studioView.classList.remove('hidden');
             this.readerView.classList.add('hidden');
         } else {
             this.tabReader.classList.add('active');
             this.tabStudio.classList.remove('active');
+            this.tabReader.setAttribute('aria-selected', 'true');
+            this.tabStudio.setAttribute('aria-selected', 'false');
             this.readerView.classList.remove('hidden');
             this.studioView.classList.add('hidden');
             this.renderReaderView();
@@ -879,7 +1130,8 @@ class BookTranslatorApp {
     }
 
     updateReaderFontClass() {
-        this.readerBody.className = `reader-body font-${this.readerFont}`;
+        // this.readerFont is already 'font-serif' or 'font-sans'
+        this.readerBody.className = `reader-body ${this.readerFont}`;
     }
 
     // --- TRANSLATION CONTROLS ---
@@ -895,13 +1147,11 @@ class BookTranslatorApp {
         if (force) params.push('force=true');
         const url = `/api/projects/${this.currentProjectId}/translate/start${params.length ? '?' + params.join('&') : ''}`;
 
-        // Immediate UI feedback
         this.updateTranslatingStatus(true);
         const chapTitle = this.currentChapter ? this.currentChapter.title : (chapterId || '');
         if (force) {
             this.appendLog('info', `[Dịch lại] Đang xóa bản dịch cũ và dịch lại từ đầu: ${chapTitle}...`);
             this.statusText.textContent = `Đang dịch lại từ đầu: ${chapTitle}...`;
-            // Clear current studio editors immediately if viewing this chapter
             if (this.currentChapterId === chapterId) {
                 const editors = this.studioParagraphs.querySelectorAll('.para-vi-editor');
                 editors.forEach(ed => { ed.innerText = ''; });
@@ -909,21 +1159,18 @@ class BookTranslatorApp {
                 chips.forEach(ch => { ch.className = 'para-status-chip chip-pending'; ch.textContent = 'Chờ dịch'; });
             }
         } else {
-            this.appendLog('info', chapterId ? `[Khởi động] Đang chuẩn bị dịch chương: ${chapTitle}...` : 'Đang chuẩn bị dịch toàn bộ sách...');
+            this.appendLog('info', chapterId
+                ? `[Khởi động] Đang chuẩn bị dịch chương: ${chapTitle}...`
+                : 'Đang chuẩn bị dịch toàn bộ sách...');
             this.statusText.textContent = 'Đang khởi động phiên dịch...';
         }
 
-        // Trigger polling immediately
         this.startStatusPolling(this.currentProjectId);
 
         try {
             const res = await fetch(url, { method: 'POST' });
             const data = await res.json();
-            if (data.status === 'ok') {
-                this.appendLog('success', data.message);
-            } else {
-                this.appendLog('info', data.message);
-            }
+            this.appendLog(data.status === 'ok' ? 'success' : 'info', data.message);
         } catch (e) {
             this.appendLog('error', `Lỗi bắt đầu dịch: ${e.message}`);
             this.updateTranslatingStatus(false);
@@ -948,10 +1195,8 @@ class BookTranslatorApp {
         try {
             const res = await fetch(`/api/projects/${projectId}/glossary`);
             const data = await res.json();
-
             this.toneSelect.value = data.tone || 'novel';
             this.customInstructions.value = data.custom_instructions || '';
-
             this.renderCharacters(data.characters || []);
             this.renderTerms(data.terms || []);
         } catch (e) {
@@ -961,27 +1206,55 @@ class BookTranslatorApp {
 
     renderCharacters(characters) {
         this.characterList.innerHTML = '';
-        for (const c of characters) {
-            this.characterList.appendChild(this.createCharacterCardElement(c));
-        }
+        for (const c of characters) this.characterList.appendChild(this.createCharacterCardElement(c));
     }
 
     createCharacterCardElement(charData = {}) {
         const card = document.createElement('div');
         card.className = 'char-card';
-        const roleText = charData.role ? (charData.notes ? `${charData.role} — ${charData.notes}` : charData.role) : (charData.notes || '');
-        card.innerHTML = `
-            <div class="char-card-row">
-                <input type="text" class="styled-input input-sm char-input-name" placeholder="Tên NV" value="${this.escapeHtml(charData.name || '')}">
-                <button class="btn-del-item" title="Xóa nhân vật" onclick="this.closest('.char-card').remove()">✕</button>
-            </div>
-            <div class="char-card-row">
-                <input type="text" class="styled-input input-sm char-input-pronoun" placeholder="Xưng hô: tôi - cậu / anh - em" value="${this.escapeHtml(charData.first_person ? `${charData.first_person} - ${charData.second_person}` : '')}">
-            </div>
-            <div class="char-card-row">
-                <input type="text" class="styled-input input-sm char-input-role" placeholder="Vai trò & Ghi chú xưng hô" title="${this.escapeHtml(roleText)}" value="${this.escapeHtml(roleText)}">
-            </div>
-        `;
+        const roleText = charData.role
+            ? (charData.notes ? `${charData.role} - ${charData.notes}` : charData.role)
+            : (charData.notes || '');
+
+        const row1 = document.createElement('div');
+        row1.className = 'char-card-row';
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'styled-input input-sm char-input-name';
+        nameInput.placeholder = 'Tên nhân vật';
+        nameInput.value = charData.name || '';
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn-del-item';
+        delBtn.title = 'Xóa nhân vật';
+        delBtn.textContent = '×';
+        delBtn.setAttribute('aria-label', delBtn.title);
+        delBtn.addEventListener('click', () => card.remove());
+        row1.appendChild(nameInput);
+        row1.appendChild(delBtn);
+
+        const row2 = document.createElement('div');
+        row2.className = 'char-card-row';
+        const pronounInput = document.createElement('input');
+        pronounInput.type = 'text';
+        pronounInput.className = 'styled-input input-sm char-input-pronoun';
+        pronounInput.placeholder = 'Xưng hô: tôi - cậu / anh - em';
+        pronounInput.value = charData.first_person ? `${charData.first_person} - ${charData.second_person}` : '';
+        row2.appendChild(pronounInput);
+
+        const row3 = document.createElement('div');
+        row3.className = 'char-card-row';
+        const roleInput = document.createElement('input');
+        roleInput.type = 'text';
+        roleInput.className = 'styled-input input-sm char-input-role';
+        roleInput.placeholder = 'Vai trò & ghi chú xưng hô';
+        roleInput.title = roleText;
+        roleInput.value = roleText;
+        row3.appendChild(roleInput);
+
+        card.appendChild(row1);
+        card.appendChild(row2);
+        card.appendChild(row3);
         return card;
     }
 
@@ -993,22 +1266,46 @@ class BookTranslatorApp {
 
     renderTerms(terms) {
         this.termsList.innerHTML = '';
-        for (const t of terms) {
-            this.termsList.appendChild(this.createTermCardElement(t));
-        }
+        for (const t of terms) this.termsList.appendChild(this.createTermCardElement(t));
     }
 
     createTermCardElement(termData = {}) {
         const card = document.createElement('div');
         card.className = 'term-card';
-        card.innerHTML = `
-            <div class="char-card-row">
-                <input type="text" class="styled-input input-sm term-input-src" placeholder="Từ gốc (EN)" value="${this.escapeHtml(termData.source_term || '')}" style="width: 45%;">
-                <span>➔</span>
-                <input type="text" class="styled-input input-sm term-input-tgt" placeholder="Bản dịch (VI)" value="${this.escapeHtml(termData.target_term || '')}" style="width: 45%;">
-                <button class="btn-del-item" title="Xóa thuật ngữ" onclick="this.closest('.term-card').remove()">✕</button>
-            </div>
-        `;
+
+        const row = document.createElement('div');
+        row.className = 'char-card-row';
+
+        const srcInput = document.createElement('input');
+        srcInput.type = 'text';
+        srcInput.className = 'styled-input input-sm term-input-src';
+        srcInput.placeholder = 'Từ gốc (EN)';
+        srcInput.value = termData.source_term || '';
+        srcInput.style.width = '45%';
+
+        const arrow = document.createElement('span');
+        arrow.textContent = '->';
+
+        const tgtInput = document.createElement('input');
+        tgtInput.type = 'text';
+        tgtInput.className = 'styled-input input-sm term-input-tgt';
+        tgtInput.placeholder = 'Bản dịch (VI)';
+        tgtInput.value = termData.target_term || '';
+        tgtInput.style.width = '45%';
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn-del-item';
+        delBtn.title = 'Xóa thuật ngữ';
+        delBtn.textContent = '×';
+        delBtn.setAttribute('aria-label', delBtn.title);
+        delBtn.addEventListener('click', () => card.remove());
+
+        row.appendChild(srcInput);
+        row.appendChild(arrow);
+        row.appendChild(tgtInput);
+        row.appendChild(delBtn);
+        card.appendChild(row);
         return card;
     }
 
@@ -1021,9 +1318,9 @@ class BookTranslatorApp {
     async autoDetectCharacters() {
         if (!this.currentProjectId) return;
         const btn = this.btnAutoDetectChars;
-        const origText = btn.innerHTML;
+        const origText = btn.textContent;
         btn.disabled = true;
-        btn.innerHTML = '⏳ Đang tra cứu AI...';
+        btn.textContent = 'Đang tra cứu AI...';
         this.appendLog('info', 'Đang dùng AI & tri thức văn học tra cứu toàn diện nhân vật & xưng hô...');
         try {
             const res = await fetch(`/api/projects/${this.currentProjectId}/glossary/auto_detect`, { method: 'POST' });
@@ -1037,51 +1334,40 @@ class BookTranslatorApp {
             this.appendLog('error', `Lỗi phân tích nhân vật: ${e.message}`);
         } finally {
             btn.disabled = false;
-            btn.innerHTML = origText;
+            btn.textContent = origText;
         }
     }
 
     async saveGlossary() {
         if (!this.currentProjectId) return;
 
-        // Collect characters
         const characters = [];
-        const charCards = this.characterList.querySelectorAll('.char-card');
-        charCards.forEach(card => {
+        this.characterList.querySelectorAll('.char-card').forEach(card => {
             const name = card.querySelector('.char-input-name').value.trim();
             const pronounStr = card.querySelector('.char-input-pronoun').value.trim();
             const role = card.querySelector('.char-input-role').value.trim();
-
             if (name) {
-                const parts = pronounStr.split(/[-–/]/).map(s => s.trim());
+                const parts = pronounStr.split(/[-–\/]/).map(s => s.trim());
                 characters.push({
-                    name: name,
-                    gender: 'unknown',
-                    role: role,
+                    name, gender: 'unknown', role,
                     first_person: parts[0] || 'tôi',
                     second_person: parts[1] || 'cậu',
-                    third_person: name,
-                    notes: ''
+                    third_person: name, notes: ''
                 });
             }
         });
 
-        // Collect terms
         const terms = [];
-        const termCards = this.termsList.querySelectorAll('.term-card');
-        termCards.forEach(card => {
+        this.termsList.querySelectorAll('.term-card').forEach(card => {
             const src = card.querySelector('.term-input-src').value.trim();
             const tgt = card.querySelector('.term-input-tgt').value.trim();
-            if (src && tgt) {
-                terms.push({ source_term: src, target_term: tgt, category: 'general', description: '' });
-            }
+            if (src && tgt) terms.push({ source_term: src, target_term: tgt, category: 'general', description: '' });
         });
 
         const payload = {
             tone: this.toneSelect.value,
             custom_instructions: this.customInstructions.value.trim(),
-            characters: characters,
-            terms: terms
+            characters, terms
         };
 
         try {
@@ -1101,7 +1387,6 @@ class BookTranslatorApp {
 
     async handleFileUpload(file) {
         if (!file) return;
-
         this.uploadProgressContainer.classList.remove('hidden');
         this.uploadStatusText.textContent = `Đang phân tích sách: ${file.name}...`;
 
@@ -1109,20 +1394,15 @@ class BookTranslatorApp {
         formData.append('file', file);
 
         try {
-            const res = await fetch('/api/projects/upload', {
-                method: 'POST',
-                body: formData
-            });
+            const res = await fetch('/api/projects/upload', { method: 'POST', body: formData });
             if (!res.ok) {
                 const err = await res.json();
                 throw new Error(err.detail || 'Lỗi tải sách');
             }
-
             const data = await res.json();
             this.appendLog('success', `Đã nạp thành công cuốn sách: "${data.title}" (${data.chapters_count} chương, ${data.paragraphs_count} đoạn)`);
             this.hideModal(this.uploadModal);
             this.uploadProgressContainer.classList.add('hidden');
-
             await this.loadProjects();
             this.selectProject(data.project_id);
         } catch (e) {
@@ -1137,7 +1417,6 @@ class BookTranslatorApp {
         try {
             const res = await fetch('/api/settings');
             const data = await res.json();
-
             this.settingsProvider.value = data.provider || 'gemini';
             this.settingsApiKey.value = data.api_key || '';
             this.updateApiKeyCounter();
@@ -1146,7 +1425,6 @@ class BookTranslatorApp {
             this.settingsBaseUrl.value = data.base_url || '';
             this.settingsTemp.value = data.temperature || 0.3;
             this.tempValueDisplay.textContent = this.settingsTemp.value;
-
             this.updateProviderFormVisibility(currentModel);
         } catch (e) {
             this.appendLog('error', `Lỗi tải cấu hình: ${e.message}`);
@@ -1158,80 +1436,46 @@ class BookTranslatorApp {
         const select = this.settingsModelSelect;
         select.innerHTML = '';
 
-        if (provider === 'gemini') {
-            this.groupBaseUrl.classList.add('hidden');
-            this.groupApiKey.classList.remove('hidden');
-            select.innerHTML = `
-                <option value="gemini-3.5-flash">gemini-3.5-flash (Khuyên dùng: Hạn mức cao, văn chương tuyệt vời)</option>
-                <option value="gemini-flash-latest">gemini-flash-latest (Bản Flash mới nhất)</option>
-                <option value="gemini-3.6-flash">gemini-3.6-flash (Bản Flash Preview)</option>
-                <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Gemini Pro: Đỉnh cao văn học)</option>
-                <option value="custom">✏️ Nhập tên mô hình khác...</option>
-            `;
-            if (this.modelHelpText) {
-                this.modelHelpText.innerHTML = '👉 Khuyên dùng: <strong>gemini-3.5-flash</strong> (Hạn mức dồi dào, tự động xoay chuyển model thông minh).';
-            }
-        } else if (provider === 'deepseek') {
-            this.groupBaseUrl.classList.remove('hidden');
-            this.settingsBaseUrl.value = 'https://api.deepseek.com/v1';
-            this.groupApiKey.classList.remove('hidden');
-            select.innerHTML = `
-                <option value="deepseek-chat">deepseek-chat (DeepSeek-V3: Chi phí cực rẻ, tiếng Việt xuất sắc)</option>
-                <option value="deepseek-reasoner">deepseek-reasoner (DeepSeek-R1: Suy luận và dịch ngữ cảnh khó)</option>
-                <option value="custom">✏️ Nhập tên mô hình khác...</option>
-            `;
-            if (this.modelHelpText) {
-                this.modelHelpText.innerHTML = '👉 Khuyên dùng: <strong>deepseek-chat</strong> (Rất rẻ, văn phong dịch sang tiếng Việt cực hay).';
-            }
-        } else if (provider === 'openai') {
-            this.groupBaseUrl.classList.add('hidden');
-            this.groupApiKey.classList.remove('hidden');
-            select.innerHTML = `
-                <option value="gpt-4o-mini">gpt-4o-mini (Tiết kiệm chi phí, tốc độ cao)</option>
-                <option value="gpt-4o">gpt-4o (Mô hình thông minh nhất của OpenAI)</option>
-                <option value="custom">✏️ Nhập tên mô hình khác...</option>
-            `;
-            if (this.modelHelpText) {
-                this.modelHelpText.innerHTML = '👉 Khuyên dùng: <strong>gpt-4o-mini</strong> hoặc <strong>gpt-4o</strong>.';
-            }
-        } else if (provider === 'openrouter') {
-            this.groupBaseUrl.classList.remove('hidden');
-            this.settingsBaseUrl.value = 'https://openrouter.ai/api/v1';
-            this.groupApiKey.classList.remove('hidden');
-            select.innerHTML = `
-                <option value="deepseek/deepseek-chat">deepseek/deepseek-chat</option>
-                <option value="anthropic/claude-3.5-sonnet">anthropic/claude-3.5-sonnet (Văn chương xuất sắc)</option>
-                <option value="google/gemini-2.5-flash">google/gemini-2.5-flash</option>
-                <option value="custom">✏️ Nhập tên mô hình khác...</option>
-            `;
-        } else if (provider === 'ollama') {
-            this.groupBaseUrl.classList.remove('hidden');
-            this.settingsBaseUrl.value = 'http://localhost:11434/v1';
-            this.groupApiKey.classList.add('hidden');
-            select.innerHTML = `
-                <option value="qwen2.5:7b">qwen2.5:7b (Khuyên dùng: Đã cài sẵn, dịch tiếng Việt xuất sắc nhất)</option>
-                <option value="qwen3.5:4b">qwen3.5:4b (Đã cài sẵn trên máy)</option>
-                <option value="qwen2.5vl:3b">qwen2.5vl:3b (Đã cài sẵn trên máy)</option>
-                <option value="custom">✏️ Nhập tên mô hình khác...</option>
-            `;
-            if (this.modelHelpText) {
-                this.modelHelpText.innerHTML = '👉 <strong>qwen2.5:7b</strong> đã có sẵn trên máy của bạn và chạy mượt trên GTX 1070 (Offline 100%, không bao giờ hết quota).';
-            }
-        } else if (provider === 'free_fallback') {
-            this.groupBaseUrl.classList.add('hidden');
-            this.groupApiKey.classList.add('hidden');
-            select.innerHTML = `
-                <option value="free-fallback">Dịch tự động miễn phí (Không cần cấu hình)</option>
-            `;
-            if (this.modelHelpText) {
-                this.modelHelpText.innerHTML = '👉 Chế độ dùng thử: Không cần nhập API key hay tên mô hình.';
-            }
+        const models = {
+            gemini: ['gemini-3.5-flash', 'gemini-flash-latest', 'gemini-3.6-flash', 'gemini-3.1-pro-preview'],
+            deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+            openai: ['gpt-4o-mini', 'gpt-4o'],
+            openrouter: ['deepseek/deepseek-chat', 'anthropic/claude-3.5-sonnet', 'google/gemini-2.5-flash'],
+            ollama: ['qwen2.5:7b', 'qwen3.5:4b', 'qwen2.5vl:3b'],
+            free_fallback: ['free-fallback']
+        };
+        const baseUrls = {
+            deepseek: 'https://api.deepseek.com/v1',
+            openrouter: 'https://openrouter.ai/api/v1',
+            ollama: 'http://localhost:11434/v1'
+        };
+        this.groupBaseUrl.classList.toggle('hidden', !baseUrls[provider]);
+        this.groupApiKey.classList.toggle('hidden', ['ollama', 'free_fallback'].includes(provider));
+        if (baseUrls[provider] && selectedModel === null) {
+            this.settingsBaseUrl.value = baseUrls[provider];
+        }
+        for (const model of models[provider] || []) {
+            const option = document.createElement('option');
+            option.value = model;
+            option.textContent = model === 'free-fallback' ? 'Dùng thử không cần API key' : model;
+            select.appendChild(option);
+        }
+        if (provider !== 'free_fallback') {
+            const custom = document.createElement('option');
+            custom.value = 'custom';
+            custom.textContent = 'Nhập tên mô hình khác…';
+            select.appendChild(custom);
+        }
+        if (this.modelHelpText) {
+            this.modelHelpText.textContent = provider === 'ollama'
+                ? 'Cần cài mô hình tương ứng trong Ollama trước khi sử dụng.'
+                : 'Chọn mô hình tương thích với nhà cung cấp và hạn mức của bạn.';
         }
 
         // Set select value
         const targetModel = selectedModel || select.options[0]?.value || '';
         let found = false;
-        for (let opt of select.options) {
+        for (const opt of select.options) {
             if (opt.value === targetModel) {
                 select.value = targetModel;
                 this.settingsModel.value = targetModel;
@@ -1257,20 +1501,14 @@ class BookTranslatorApp {
         const multSpan = document.getElementById('multiKeyMultiplier');
 
         if (keys.length > 1) {
-            if (badge) {
-                badge.style.display = 'inline-block';
-                badge.textContent = `🚀 ${keys.length} Keys (Song song)`;
-            }
+            if (badge) { badge.style.display = 'inline-block'; badge.textContent = `${keys.length} key`; }
             if (notice) {
                 notice.style.display = 'block';
                 if (countSpan) countSpan.textContent = keys.length;
                 if (multSpan) multSpan.textContent = keys.length;
             }
         } else if (keys.length === 1) {
-            if (badge) {
-                badge.style.display = 'inline-block';
-                badge.textContent = `1 Key (1 luồng)`;
-            }
+            if (badge) { badge.style.display = 'inline-block'; badge.textContent = `1 key`; }
             if (notice) notice.style.display = 'none';
         } else {
             if (badge) badge.style.display = 'none';
@@ -1286,7 +1524,6 @@ class BookTranslatorApp {
             base_url: this.settingsBaseUrl.value.trim(),
             temperature: parseFloat(this.settingsTemp.value)
         };
-
         try {
             const res = await fetch('/api/settings', {
                 method: 'POST',
@@ -1316,7 +1553,11 @@ class BookTranslatorApp {
         if (spinner) spinner.style.display = 'inline-block';
         if (container) {
             container.style.display = 'block';
-            container.innerHTML = '<div style="padding: 10px; text-align: center; color: #94a3b8; font-size: 0.82rem;">⏳ Đang kết nối và kiểm tra hạn mức các Key...</div>';
+            container.innerHTML = '';
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'quota-message';
+            loadingDiv.textContent = 'Đang kiểm tra hạn mức…';
+            container.appendChild(loadingDiv);
         }
 
         try {
@@ -1332,60 +1573,83 @@ class BookTranslatorApp {
 
             const data = await res.json();
             if (data.status === 'empty' || !data.keys || data.keys.length === 0) {
-                container.innerHTML = `<div style="padding: 8px; color: #f87171; font-size: 0.8rem;">${data.message || 'Không có key nào để kiểm tra.'}</div>`;
+                container.innerHTML = '';
+                const errDiv = document.createElement('div');
+                errDiv.className = 'quota-error';
+                errDiv.textContent = data.message || 'Không có key nào để kiểm tra.';
+                container.appendChild(errDiv);
                 return;
             }
 
-            let html = `<div style="font-size: 0.8rem; font-weight: 600; color: #e2e8f0; margin-bottom: 6px; display: flex; justify-content: space-between;">
-                <span>📋 Kết quả kiểm tra (${data.keys.length} Keys):</span>
-                <span style="color: #94a3b8; font-weight: normal; cursor: pointer;" onclick="document.getElementById('quotaCheckResults').style.display='none'">✕ Đóng</span>
-            </div>`;
+            container.innerHTML = '';
+
+            const header = document.createElement('div');
+            header.className = 'quota-header';
+            const titleSpan = document.createElement('span');
+            titleSpan.textContent = `Kết quả kiểm tra (${data.keys.length} key)`;
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.className = 'quota-close';
+            closeBtn.textContent = 'Đóng';
+            closeBtn.addEventListener('click', () => { container.style.display = 'none'; });
+            header.appendChild(titleSpan);
+            header.appendChild(closeBtn);
+            container.appendChild(header);
 
             data.keys.forEach(k => {
-                let badgeText = '🟢 Sẵn sàng';
-                let badgeBg = 'rgba(34, 197, 94, 0.15)';
-                let badgeColor = '#4ade80';
+                const statusTextMap = {
+                    ok: 'Sẵn sàng',
+                    daily_limit: 'Hết hạn mức 24h',
+                    rpm_wait: 'Chờ lượt yêu cầu',
+                    error: 'Lỗi / Không hợp lệ'
+                };
+                const statusText = statusTextMap[k.status] || k.status || 'Không rõ';
 
-                if (k.status === 'daily_limit') {
-                    badgeText = '🟠 Hết hạn mức 24h';
-                    badgeBg = 'rgba(249, 115, 22, 0.15)';
-                    badgeColor = '#fb923c';
-                } else if (k.status === 'rpm_wait') {
-                    badgeText = '🟡 Chờ hồi lượt (15 RPM)';
-                    badgeBg = 'rgba(234, 179, 8, 0.15)';
-                    badgeColor = '#facc15';
-                } else if (k.status === 'error') {
-                    badgeText = '🔴 Lỗi / Không hợp lệ';
-                    badgeBg = 'rgba(239, 68, 68, 0.15)';
-                    badgeColor = '#f87171';
-                }
+                const keyDiv = document.createElement('div');
+                keyDiv.className = 'quota-key';
 
-                let modelsHtml = '';
+                const keyHeader = document.createElement('div');
+                keyHeader.className = 'quota-key-header';
+
+                const keyLabel = document.createElement('span');
+                // escapeHtml for API-returned masked_key
+                keyLabel.textContent = `Key #${k.key_index} (${k.masked_key || ''})`;
+
+                const statusSpan = document.createElement('span');
+                statusSpan.className = `quota-status quota-status--${k.status || 'ok'}`;
+                statusSpan.textContent = statusText;
+
+                keyHeader.appendChild(keyLabel);
+                keyHeader.appendChild(statusSpan);
+
+                const summaryDiv = document.createElement('div');
+                summaryDiv.className = 'quota-summary';
+                summaryDiv.textContent = k.summary || '';
+
+                keyDiv.appendChild(keyHeader);
+                keyDiv.appendChild(summaryDiv);
+
                 if (k.models && k.models.length > 0) {
-                    modelsHtml = `<div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">` +
-                        k.models.map(m => {
-                            let dot = m.status === 'ok' ? '🟢' : (m.status === 'daily_limit' ? '🟠' : (m.status === 'rpm_wait' ? '🟡' : '🔴'));
-                            return `<span style="font-size: 0.7rem; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 4px; color: #cbd5e1;">${dot} ${m.model}: ${m.text}</span>`;
-                        }).join('') + `</div>`;
+                    const modelsDiv = document.createElement('div');
+                    modelsDiv.className = 'quota-models';
+                    const mStatusTextMap = { ok: 'Sẵn sàng', daily_limit: 'Hết hạn mức', rpm_wait: 'Chờ lượt', error: 'Lỗi' };
+                    k.models.forEach(m => {
+                        const modelSpan = document.createElement('span');
+                        modelSpan.className = 'quota-model';
+                        modelSpan.textContent = `${m.model}: ${mStatusTextMap[m.status] || m.text || ''}`;
+                        modelsDiv.appendChild(modelSpan);
+                    });
+                    keyDiv.appendChild(modelsDiv);
                 }
 
-                html += `
-                <div style="padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 4px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <div>
-                            <span style="font-weight: 600; color: #f1f5f9; font-size: 0.82rem;">Key #${k.key_index}</span>
-                            <span style="font-family: monospace; color: #94a3b8; font-size: 0.75rem; margin-left: 4px;">(${k.masked_key})</span>
-                        </div>
-                        <span style="background: ${badgeBg}; color: ${badgeColor}; font-size: 0.72rem; padding: 2px 7px; border-radius: 4px; font-weight: 500;">${badgeText}</span>
-                    </div>
-                    <div style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;">${k.summary}</div>
-                    ${modelsHtml}
-                </div>`;
+                container.appendChild(keyDiv);
             });
-
-            container.innerHTML = html;
         } catch (e) {
-            container.innerHTML = `<div style="padding: 8px; color: #f87171; font-size: 0.8rem;">Lỗi kiểm tra: ${e.message}</div>`;
+            container.innerHTML = '';
+            const errDiv = document.createElement('div');
+            errDiv.className = 'quota-error';
+            errDiv.textContent = `Lỗi kiểm tra: ${e.message}`;
+            container.appendChild(errDiv);
         } finally {
             if (btn) btn.disabled = false;
             if (spinner) spinner.style.display = 'none';
@@ -1408,18 +1672,187 @@ class BookTranslatorApp {
         this.hideModal(this.exportModal);
     }
 
-    // --- MODAL UTILS ---
-    showModal(el) { el.classList.remove('hidden'); }
-    hideModal(el) { el.classList.add('hidden'); }
+    // --- TEXTBOOK CONVERSION ---
+
+    resetTextbookModal() {
+        if (this.textbookProgressContainer) this.textbookProgressContainer.classList.add('hidden');
+        if (this.textbookSuccessBox) this.textbookSuccessBox.classList.add('hidden');
+        if (this.textbookActionFooter) this.textbookActionFooter.classList.remove('hidden');
+        if (this.textbookProgressBar) this.textbookProgressBar.style.width = '0%';
+        if (this.textbookPercentDisplay) this.textbookPercentDisplay.textContent = '0%';
+        if (this.textbookProgressContainer) this.textbookProgressContainer.setAttribute('aria-valuenow', '0');
+    }
+
+    async startTextbookConversion() {
+        const file = this.textbookFileInput && this.textbookFileInput.files ? this.textbookFileInput.files[0] : null;
+        const existingFilename = this.textbookExistingSelect ? this.textbookExistingSelect.value : null;
+
+        if (!file && !existingFilename) {
+            alert('Vui lòng chọn một file PDF giáo trình.');
+            return;
+        }
+
+        const formData = new FormData();
+        if (file) formData.append('file', file);
+        else formData.append('filename', existingFilename);
+
+        this.textbookProgressContainer.classList.remove('hidden');
+        this.textbookSuccessBox.classList.add('hidden');
+        this.textbookActionFooter.classList.add('hidden');
+        this.textbookStatusTitle.textContent = 'Đang khởi động phân tích giáo trình...';
+        this.textbookPercentDisplay.textContent = '0%';
+        this.textbookProgressBar.style.width = '0%';
+        this.textbookMessageDisplay.textContent = 'Đang kết nối đến server...';
+
+        try {
+            const resp = await fetch('/api/textbook/convert', { method: 'POST', body: formData });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data.detail || 'Khởi động thất bại');
+            this.pollTextbookProgress(data.task_id);
+        } catch (err) {
+            this.textbookStatusTitle.textContent = 'Lỗi!';
+            this.textbookMessageDisplay.textContent = err.message;
+            this.textbookActionFooter.classList.remove('hidden');
+        }
+    }
+
+    pollTextbookProgress(taskId) {
+        const timer = setInterval(async () => {
+            try {
+                const resp = await fetch(`/api/textbook/status/${taskId}`);
+                if (!resp.ok) return;
+                const status = await resp.json();
+
+                const pct = status.progress || 0;
+                this.textbookPercentDisplay.textContent = `${pct}%`;
+                this.textbookProgressBar.style.width = `${pct}%`;
+                this.textbookMessageDisplay.textContent = status.message || '';
+                if (this.textbookProgressContainer) {
+                    this.textbookProgressContainer.setAttribute('aria-valuenow', String(pct));
+                }
+
+                if (status.status === 'done') {
+                    clearInterval(timer);
+                    this.textbookProgressContainer.classList.add('hidden');
+                    this.textbookSuccessBox.classList.remove('hidden');
+                    this.textbookSuccessTitle.textContent = `Chuyển đổi thành công: ${status.title || 'Giáo trình'}`;
+                    this.textbookSuccessMeta.textContent = `Tác giả: ${status.author || 'N/A'} | Gồm ${status.chapters_count || 0} chương, ${status.paragraphs_count || 0} đoạn.`;
+                    this.btnDownloadTextbookEpub.href = `/api/textbook/export/${taskId}`;
+
+                    if (this.btnOpenTextbookReader && status.project_id) {
+                        this.btnOpenTextbookReader.onclick = async () => {
+                            this.hideModal(this.textbookModal);
+                            await this.loadProjects();
+                            await this.selectProject(status.project_id);
+                            this.switchView('reader');
+                        };
+                    }
+                    this.loadProjects();
+                } else if (status.status === 'error') {
+                    clearInterval(timer);
+                    this.textbookStatusTitle.textContent = 'Quá trình chuyển đổi gặp lỗi';
+                    this.textbookMessageDisplay.textContent = status.message;
+                    this.textbookActionFooter.classList.remove('hidden');
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }, 1500);
+    }
+
+    // --- MODAL UTILS: accessible focus containment, Escape, inert ---
+
+    _syncModalInert() {
+        const top = this._modalStack[this._modalStack.length - 1];
+        if (!top) {
+            this._inertStates.forEach((wasInert, node) => { node.inert = wasInert; });
+            this._inertStates.clear();
+            return;
+        }
+        // Dialogs are inside #app; only their siblings may be inert.
+        Array.from(document.getElementById('app').children).forEach(node => {
+            if (!this._inertStates.has(node)) this._inertStates.set(node, node.inert);
+            node.inert = node !== top;
+        });
+        this._modalStack.forEach((modal, index) => {
+            modal.style.zIndex = String(100 + index);
+        });
+    }
+
+    showModal(el) {
+        if (!el || this._modalStack.includes(el)) return;
+        el._returnFocus = document.activeElement;
+        el.classList.remove('hidden');
+        this._modalStack.push(el);
+        this._syncModalInert();
+
+        const card = el.querySelector('[role="dialog"]');
+        if (card) {
+            card.focus();
+            el._trapHandler = (evt) => this._trapFocus(evt, el);
+            el.addEventListener('keydown', el._trapHandler);
+        }
+    }
+
+    hideModal(el) {
+        if (!el) return;
+        const wasTop = this._modalStack[this._modalStack.length - 1] === el;
+        el.classList.add('hidden');
+        el.style.removeProperty('z-index');
+        const idx = this._modalStack.indexOf(el);
+        if (idx !== -1) this._modalStack.splice(idx, 1);
+        if (el._trapHandler) {
+            el.removeEventListener('keydown', el._trapHandler);
+            el._trapHandler = null;
+        }
+        this._syncModalInert();
+
+        if (wasTop) {
+            const top = this._modalStack[this._modalStack.length - 1];
+            const target = el._returnFocus;
+            if (target && target.isConnected && !target.closest('[inert]') && target.getClientRects().length) {
+                target.focus();
+            } else if (top) {
+                top.querySelector('[role="dialog"]')?.focus();
+            }
+        }
+        el._returnFocus = null;
+    }
+
+    _trapFocus(evt, modal) {
+        if (evt.key !== 'Tab') return;
+        const focusable = Array.from(modal.querySelectorAll(
+            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )).filter(el => el.offsetParent !== null);
+
+        if (focusable.length === 0) {
+            evt.preventDefault();
+            modal.querySelector('[role="dialog"]')?.focus();
+            return;
+        }
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (!focusable.includes(active)) {
+            evt.preventDefault();
+            (evt.shiftKey ? last : first).focus();
+        } else if (evt.shiftKey && active === first) {
+            evt.preventDefault();
+            last.focus();
+        } else if (!evt.shiftKey && active === last) {
+            evt.preventDefault();
+            first.focus();
+        }
+    }
 
     escapeHtml(str) {
-        if (!str) return '';
-        return str
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;")
-            .replace(/'/g, "&#039;");
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 }
 

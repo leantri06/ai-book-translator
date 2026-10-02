@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from core.parser import BookParser, BookProject, BookChapter, BookParagraph
 from core.glossary import BookGlossary, CharacterPronoun, TerminologyItem
 from core.exporter import BookExporter
+from core.textbook_parser import TextbookParser
 from server.database import ProjectManager, PROJECTS_DIR, SETTINGS_FILE, project_path, atomic_write_json
 from server.translator_worker import worker_instance
 
@@ -587,6 +588,110 @@ def export_book(project_id: str, export_format: str):
 def get_project_status(project_id: str, since: float = 0.0):
     """Returns live translation progress, new logs, and updated paragraphs."""
     return worker_instance.get_state(project_id, since)
+
+
+# --- Textbook PDF to EPUB Conversion Engine ---
+
+textbook_tasks = {}
+
+def _run_textbook_conversion(task_id: str, file_path: str):
+    task = textbook_tasks[task_id]
+    try:
+        settings = ProjectManager.get_settings()
+        raw_keys = settings.get("api_key", "").replace('\r', '\n').replace(';', ',').replace('\n', ',')
+        api_keys = [k.strip() for k in raw_keys.split(',') if k.strip()]
+
+        def progress_cb(current, total, msg):
+            pct = round((current / max(1, total)) * 100, 1)
+            task["progress"] = pct
+            task["current_page"] = current
+            task["total_pages"] = total
+            task["message"] = msg
+
+        safe_base = os.path.splitext(os.path.basename(file_path))[0]
+        safe_name = re.sub(r'^[0-9a-f]{8}_', '', safe_base)
+        clean_name = re.sub(r'[^\w\s\-_]', '', safe_name).strip() or "textbook"
+        out_epub = os.path.join(EXPORTS_DIR, f"{clean_name}.epub")
+
+        project, epub_path = TextbookParser.convert_pdf_to_epub(
+            file_path=file_path,
+            output_epub_path=out_epub,
+            data_dir=DATA_DIR,
+            api_keys=api_keys,
+            progress_callback=progress_cb,
+            max_workers=6,
+            project_id=task_id
+        )
+
+        task["status"] = "done"
+        task["project_id"] = project.id
+        task["title"] = project.title
+        task["author"] = project.author
+        task["chapters_count"] = project.total_chapters
+        task["paragraphs_count"] = project.total_paragraphs
+        task["epub_path"] = epub_path
+        task["message"] = f"Hoàn tất chuyển đổi giáo trình sang EPUB! ({project.total_chapters} chương)"
+    except Exception as e:
+        task["status"] = "error"
+        task["message"] = f"Lỗi: {str(e)}"
+
+
+@app.post("/api/textbook/convert")
+async def start_textbook_conversion(
+    background_tasks: BackgroundTasks,
+    file: Optional[UploadFile] = File(None),
+    filename: Optional[str] = Form(None)
+):
+    import uuid
+    task_id = str(uuid.uuid4())[:8]
+
+    if file:
+        file_name = file.filename
+        save_path = os.path.join(UPLOADS_DIR, f"{task_id}_{file_name}")
+        with open(save_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    elif filename:
+        save_path = os.path.join(UPLOADS_DIR, filename)
+        if not os.path.exists(save_path):
+            raise HTTPException(status_code=404, detail=f"Không tìm thấy file: {filename}")
+    else:
+        raise HTTPException(status_code=400, detail="Vui lòng tải lên file hoặc chỉ định tên file trong thư mục uploads.")
+
+    textbook_tasks[task_id] = {
+        "status": "processing",
+        "progress": 0.0,
+        "current_page": 0,
+        "total_pages": 0,
+        "message": "Đang khởi động phân tích giáo trình...",
+        "file_path": save_path
+    }
+
+    background_tasks.add_task(_run_textbook_conversion, task_id, save_path)
+
+    return {
+        "status": "ok",
+        "task_id": task_id,
+        "message": "Đã khởi động tiến trình chuyển đổi giáo trình trong nền."
+    }
+
+
+@app.get("/api/textbook/status/{task_id}")
+def get_textbook_status(task_id: str):
+    task = textbook_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tiến trình chuyển đổi")
+    return task
+
+
+@app.get("/api/textbook/export/{task_id}")
+def export_textbook_epub(task_id: str):
+    task = textbook_tasks.get(task_id)
+    if not task or task.get("status") != "done":
+        raise HTTPException(status_code=400, detail="Tiến trình chuyển đổi chưa hoàn thành")
+    epub_path = task.get("epub_path")
+    if not epub_path or not os.path.exists(epub_path):
+        raise HTTPException(status_code=404, detail="Không tìm thấy file EPUB")
+    return FileResponse(epub_path, media_type="application/epub+zip", filename=os.path.basename(epub_path))
 
 
 # Mount static web directory

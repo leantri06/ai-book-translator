@@ -420,10 +420,35 @@ class BookExporter:
         """Constructs a new EPUB book from scratch using ebooklib with MathML and Vietnamese font support."""
         book = epub.EpubBook()
         book.set_identifier(f"ai-book-{project.id}")
-        book_title = normalize_text(f"{project.title} (Bản Dịch Tiếng Việt)" if not bilingual else f"{project.title} (Song Ngữ Anh - Việt)")
+        is_vn_original = (
+            getattr(project, "is_textbook", False) or
+            "giáo trình" in project.title.lower() or
+            "bộ giáo dục" in project.author.lower() or
+            (bool(project.chapters) and all(p.original_text == p.translated_text for p in project.chapters[0].paragraphs[:10] if p.translated_text))
+        )
+        if bilingual:
+            book_title = normalize_text(f"{project.title} (Song Ngữ Anh - Việt)")
+        elif is_vn_original:
+            book_title = normalize_text(project.title)
+        else:
+            book_title = normalize_text(f"{project.title} (Bản Dịch Tiếng Việt)")
+
         book.set_title(book_title)
         book.set_language('vi')
         book.add_author(normalize_text(project.author))
+
+        # Add cover image from Page 1 if source was PDF
+        if project.source_format == "pdf" and project.source_file_path and os.path.exists(project.source_file_path):
+            try:
+                import pymupdf
+                src_doc = pymupdf.open(project.source_file_path)
+                if len(src_doc) > 0:
+                    cov_page = src_doc[0]
+                    cov_pix = cov_page.get_pixmap(dpi=150)
+                    cov_bytes = cov_pix.tobytes("png")
+                    book.set_cover("cover.png", cov_bytes)
+            except Exception:
+                pass
 
         epub_chapters = []
         toc = []
@@ -471,6 +496,16 @@ class BookExporter:
             text-indent: 1.5em;
             margin-bottom: 0.8em;
             text-align: justify;
+        }
+        blockquote {
+            margin: 1.2em 0.8em;
+            padding: 10px 16px;
+            background: #f8fafc;
+            border-left: 4px solid #2b6cb0;
+            font-style: italic;
+            color: #2d3748;
+            border-radius: 0 6px 6px 0;
+            text-indent: 0;
         }
         .bilingual-en {
             color: #718096;

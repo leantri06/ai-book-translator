@@ -3,462 +3,144 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Book Translator Pro - Dịch Sách AI Anh - Việt Chuyên Nghiệp</title>
-    <meta name="description" content="Phần mềm dịch sách tiếng Anh sang tiếng Việt chuyên sâu với văn phong văn học mượt mà, hỗ trợ EPUB, PDF, DOCX và kiểm soát xưng hô nhân vật.">
-    
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    
-    <!-- Stylesheet -->
-    <link rel="stylesheet" href="/static/app.css?v=3.3.1">
+    <meta name="color-scheme" content="dark">
+    <title>AI Book Translator — Không gian biên dịch</title>
+    <meta name="description" content="Không gian dịch sách Anh – Việt, đối chiếu bản dịch, quản lý thuật ngữ và xuất tài liệu.">
+    <link rel="stylesheet" href="/static/app.css?v=4.0.0">
 </head>
 <body class="dark-theme">
     <div id="app" class="app-layout">
-        <!-- TOP NAVBAR -->
         <header class="app-header">
-            <div class="header-brand">
-                <div class="brand-logo">
-                    <span class="logo-icon">📖</span>
-                    <span class="logo-sparkle">✨</span>
-                </div>
-                <div class="brand-info">
+            <div class="header-top">
+                <div class="header-brand">
                     <h1 class="brand-title">AI Book Translator <span class="badge-pro">PRO</span></h1>
-                    <span class="brand-subtitle">Chuyển ngữ văn học Anh - Việt đỉnh cao</span>
+                    <span class="brand-subtitle">Không gian biên dịch Anh – Việt</span>
+                </div>
+                <div class="header-actions">
+                    <button id="btnStartTranslate" class="btn btn-primary" title="Dịch toàn bộ sách">Bắt đầu dịch</button>
+                    <button id="btnPauseTranslate" class="btn btn-warning hidden" title="Yêu cầu dừng tiến trình dịch">Dừng dịch</button>
+                    <button id="btnExportModal" class="btn btn-outline">Xuất sách</button>
+                    <button id="btnSettingsModal" class="btn btn-text">Cài đặt</button>
                 </div>
             </div>
-
-            <!-- Current Project Info & Global Progress -->
             <div class="header-project" id="headerProjectSection">
                 <div class="project-selector-wrapper">
-                    <select id="projectSelect" class="styled-select" title="Chọn sách">
-                        <option value="">-- Đang tải danh sách sách... --</option>
-                    </select>
-                    <button id="btnNewBook" class="btn btn-outline btn-sm" title="Thêm sách mới">
-                        <span class="btn-icon">➕</span> Tải sách mới
-                    </button>
-                    <button id="btnDeleteProject" class="btn btn-outline-danger btn-sm" onclick="app && app.confirmDeleteProject ? app.confirmDeleteProject() : app.deleteCurrentProject()" title="Xóa sách / paper này">
-                        <span class="btn-icon">🗑️</span> Xóa
-                    </button>
-                </div>
-                <div class="global-progress-box" id="globalProgressBox">
-                    <div class="progress-labels">
-                        <span class="progress-name" id="projectTitleDisplay">Chưa chọn sách</span>
-                        <span class="progress-percent" id="globalPercentDisplay">0%</span>
-                    </div>
-                    <div class="progress-track">
-                        <div class="progress-fill" id="globalProgressBar" style="width: 0%"></div>
+                    <label for="projectSelect" class="project-label">Dự án</label>
+                    <select id="projectSelect" class="styled-select" title="Chọn sách"><option value="">Đang tải danh sách…</option></select>
+                    <div class="project-actions">
+                        <button id="btnNewBook" class="btn btn-outline btn-sm">Tải sách mới</button>
+                        <button id="btnTextbookModal" class="btn btn-outline btn-sm" title="Chuyển giáo trình PDF sang EPUB">PDF → EPUB</button>
+                        <button id="btnDeleteProject" class="btn btn-text btn-sm" title="Xóa dự án đang chọn">Xóa dự án</button>
                     </div>
                 </div>
-            </div>
-
-            <!-- Action Controls -->
-            <div class="header-actions">
-                <button id="btnStartTranslate" class="btn btn-primary" title="Bắt đầu dịch toàn bộ hoặc chương đang chọn">
-                    <span class="btn-icon">▶</span> <span class="btn-text">Bắt đầu Dịch</span>
-                </button>
-                <button id="btnPauseTranslate" class="btn btn-warning hidden" title="Tạm dừng tiến trình dịch">
-                    <span class="btn-icon">⏸</span> <span class="btn-text">Tạm dừng</span>
-                </button>
-                <button id="btnExportModal" class="btn btn-success" title="Xuất sách ra các định dạng">
-                    <span class="btn-icon">📥</span> <span class="btn-text">Xuất Bản Sách</span>
-                </button>
-                <button id="btnSettingsModal" class="btn btn-icon-only" title="Cài đặt API & Mô hình">
-                    ⚙️
-                </button>
+                <div class="global-progress-box" id="globalProgressBox" role="progressbar" aria-label="Tiến độ dịch sách" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                    <div class="progress-labels"><span class="progress-name" id="projectTitleDisplay">Chưa chọn sách</span><span class="progress-percent" id="globalPercentDisplay">0%</span></div>
+                    <div class="progress-track"><div class="progress-fill" id="globalProgressBar" style="width: 0%"></div></div>
+                </div>
             </div>
         </header>
-
-        <!-- MAIN WORKSPACE -->
         <main class="app-main">
-            <!-- LEFT DRAWER: Chapter Navigation -->
-            <aside class="sidebar-left" id="sidebarChapters">
-                <div class="sidebar-header">
-                    <h3 class="sidebar-title">Mục lục chương</h3>
-                    <span class="badge-count" id="chapterCountBadge">0</span>
-                </div>
-                <div class="search-box">
-                    <input type="text" id="chapterSearchInput" placeholder="Tìm chương..." class="styled-input input-sm">
-                </div>
-                <div class="chapters-list" id="chaptersList">
-                    <div class="empty-placeholder">
-                        <span class="ph-icon">📚</span>
-                        <p>Chưa có sách nào được chọn.<br>Hãy tải lên file EPUB, PDF hoặc DOCX.</p>
-                    </div>
-                </div>
+            <button id="panelBackdrop" class="panel-backdrop hidden" aria-label="Đóng bảng điều khiển" tabindex="-1"></button>
+            <aside class="sidebar-left" id="sidebarChapters" aria-label="Mục lục">
+                <div class="sidebar-header"><h2 class="sidebar-title">Mục lục</h2><div class="sidebar-header-actions"><span class="badge-count" id="chapterCountBadge">0</span><button id="btnCloseChapters" class="btn-close-panel mobile-only" aria-label="Đóng mục lục">×</button></div></div>
+                <div class="search-box"><label for="chapterSearchInput" class="sr-only">Tìm chương</label><input type="search" id="chapterSearchInput" placeholder="Tìm chương…" class="styled-input input-sm full-width"></div>
+                <nav class="chapters-list" id="chaptersList" aria-label="Danh sách chương"><div class="empty-placeholder"><p>Chưa có sách được chọn.<br>Tải sách lên để bắt đầu.</p></div></nav>
             </aside>
-
-            <!-- CENTER WORKSPACE: Studio / Reader -->
-            <section class="content-center">
-                <!-- View Mode Bar -->
+            <section class="content-center" aria-label="Không gian biên dịch">
                 <div class="view-mode-bar">
-                    <div class="view-tabs">
-                        <button class="view-tab active" data-view="studio" id="tabStudio">
-                            <span class="tab-icon">⚖️</span> Song ngữ đối chiếu
-                        </button>
-                        <button class="view-tab" data-view="reader" id="tabReader">
-                            <span class="tab-icon">📖</span> Chế độ đọc sách
-                        </button>
+                    <div class="view-navigation">
+                        <button id="btnToggleChapters" class="btn btn-outline btn-sm mobile-only" aria-controls="sidebarChapters" aria-expanded="false">Mục lục</button>
+                        <div class="view-tabs" role="tablist" aria-label="Chế độ xem"><button class="view-tab active" data-view="studio" id="tabStudio" role="tab" aria-selected="true" aria-controls="studioView">Đối chiếu</button><button class="view-tab" data-view="reader" id="tabReader" role="tab" aria-selected="false" aria-controls="readerView">Đọc sách</button></div>
+                        <div class="current-chapter-header"><span class="current-chap-label">Chương</span><strong class="current-chap-title" id="activeChapterTitle">Chọn một chương để bắt đầu</strong></div>
                     </div>
-                    
-                    <div class="current-chapter-header">
-                        <span class="current-chap-label">Chương hiện tại:</span>
-                        <strong class="current-chap-title" id="activeChapterTitle">Vui lòng chọn chương</strong>
-                    </div>
-
-                    <div class="chapter-actions">
-                        <button id="btnTranslateCurrentChapter" class="btn btn-outline btn-sm" title="Dịch các đoạn còn thiếu trong chương này">
-                            ⚡ Dịch chương này
-                        </button>
-                        <button id="btnRetranslateCurrentChapter" class="btn btn-outline btn-sm" style="border-color: rgba(245, 158, 11, 0.6); color: #fbbf24;" title="Xóa bản dịch cũ và dịch lại toàn bộ chương này từ đầu bằng mô hình AI hiện tại">
-                            🔄 Dịch lại từ đầu
-                        </button>
-                        <button id="btnToggleRightSidebar" class="btn btn-outline btn-sm" title="Mở cài đặt xưng hô">
-                            👥 Nhân vật & Văn phong
-                        </button>
-                    </div>
+                    <div class="chapter-actions"><button id="btnTranslateCurrentChapter" class="btn btn-outline btn-sm" title="Dịch các đoạn còn thiếu">Dịch chương</button><button id="btnRetranslateCurrentChapter" class="btn btn-text btn-sm" title="Xác nhận trước khi dịch lại toàn bộ chương">Dịch lại</button><button id="btnToggleRightSidebar" class="btn btn-outline btn-sm" aria-controls="sidebarRight" aria-expanded="false">Văn phong & thuật ngữ</button></div>
                 </div>
-
-                <!-- DUAL STUDIO VIEW (Side-by-Side) -->
-                <div class="studio-view" id="studioView">
-                    <div class="studio-columns-header">
-                        <div class="col-header en-header">
-                            <span class="lang-flag">🇬🇧</span> Bản gốc Tiếng Anh
-                        </div>
-                        <div class="col-header vi-header">
-                            <span class="lang-flag">🇻🇳</span> Bản dịch Tiếng Việt (Có thể nhấp để sửa trực tiếp)
-                        </div>
-                    </div>
+                <div class="studio-view" id="studioView" role="tabpanel" aria-labelledby="tabStudio">
+                    <div class="studio-columns-header"><div class="col-header en-header">Bản gốc <span>Tiếng Anh</span></div><div class="col-header vi-header">Bản dịch <span>Tiếng Việt · Nhấp để chỉnh sửa</span></div></div>
                     <div class="studio-paragraphs-container" id="studioParagraphs">
-                        <div class="empty-state-large">
-                            <div class="empty-illustration">📖 ➔ ✨ ➔ 🇻🇳</div>
-                            <h2>Sẵn sàng dịch cuốn sách của bạn</h2>
-                            <p>Tải lên sách tiếng Anh (EPUB, PDF, DOCX, TXT) hoặc chọn một chương bên trái để bắt đầu đọc và dịch với văn phong cao cấp.</p>
-                            <button class="btn btn-primary btn-lg" onclick="document.getElementById('btnNewBook').click()">
-                                ➕ Tải sách lên ngay
-                            </button>
-                        </div>
+                        <div class="empty-state-large"><span class="eyebrow">BIÊN DỊCH · ĐỐI CHIẾU · ĐỌC SÁCH</span><h2>Mỗi cuốn sách,<br>một không gian làm việc.</h2><p>Tải tài liệu lên, chọn chương và đối chiếu bản gốc với bản dịch. Quản lý xưng hô và thuật ngữ xuyên suốt cuốn sách.</p><button class="btn btn-primary btn-lg" onclick="document.getElementById('btnNewBook').click()">Tải sách lên</button><span class="supported-formats">EPUB / PDF / DOCX / TXT / MD</span></div>
                     </div>
                 </div>
-
-                <!-- READER VIEW (Kindle-style) -->
-                <div class="reader-view hidden" id="readerView">
+                <div class="reader-view hidden" id="readerView" role="tabpanel" aria-labelledby="tabReader">
                     <div class="reader-controls">
-                        <div class="reader-control-group">
-                            <label>Kiểu chữ:</label>
-                            <button class="btn-font-toggle active" data-font="merriweather">Serif</button>
-                            <button class="btn-font-toggle" data-font="sans">Sans-serif</button>
-                        </div>
-                        <div class="reader-control-group">
-                            <label>Cỡ chữ:</label>
-                            <button class="btn-size" id="btnFontDec">A-</button>
-                            <span id="fontSizeDisplay">18px</span>
-                            <button class="btn-size" id="btnFontInc">A+</button>
-                        </div>
-                        <div class="reader-control-group">
-                            <label>Hiển thị:</label>
-                            <select id="readerDisplayMode" class="styled-select select-sm">
-                                <option value="vi-only">Chỉ tiếng Việt</option>
-                                <option value="bilingual">Song ngữ đối chiếu</option>
-                                <option value="en-only">Chỉ tiếng Anh</option>
-                            </select>
-                        </div>
+                        <div class="reader-control-group"><span>Kiểu chữ</span><button class="btn-font-toggle active" data-font="merriweather" aria-pressed="true">Serif</button><button class="btn-font-toggle" data-font="sans" aria-pressed="false">Sans</button></div>
+                        <div class="reader-control-group"><span>Cỡ chữ</span><button class="btn-size" id="btnFontDec" aria-label="Giảm cỡ chữ">A−</button><span id="fontSizeDisplay">18px</span><button class="btn-size" id="btnFontInc" aria-label="Tăng cỡ chữ">A+</button></div>
+                        <div class="reader-control-group"><label for="readerDisplayMode">Nội dung</label><select id="readerDisplayMode" class="styled-select select-sm"><option value="vi-only">Tiếng Việt</option><option value="bilingual">Song ngữ</option><option value="en-only">Tiếng Anh</option></select></div>
                     </div>
-                    <div class="reader-body" id="readerBody">
-                        <!-- Rendered book content -->
-                    </div>
+                    <div class="reader-body font-serif" id="readerBody"></div>
                 </div>
             </section>
-
-            <!-- RIGHT DRAWER: Characters, Pronouns & Tone -->
-            <aside class="sidebar-right" id="sidebarRight">
-                <div class="sidebar-header">
-                    <h3 class="sidebar-title">🎭 Nhân vật & Văn phong</h3>
-                    <button class="btn-close-panel" id="btnCloseRightSidebar">✕</button>
-                </div>
-
+            <aside class="sidebar-right collapsed" id="sidebarRight" aria-label="Văn phong và thuật ngữ">
+                <div class="sidebar-header"><h2 class="sidebar-title">Thiết lập bản dịch</h2><button class="btn-close-panel" id="btnCloseRightSidebar" aria-label="Đóng thiết lập bản dịch">×</button></div>
                 <div class="sidebar-right-content">
-                    <!-- Genre & Tone -->
-                    <div class="setting-group">
-                        <label class="group-label">Thể loại & Giọng văn:</label>
-                        <select id="toneSelect" class="styled-select full-width">
-                            <option value="novel">📖 Tiểu thuyết / Văn học (Mượt mà, giàu cảm xúc)</option>
-                            <option value="fantasy">⚔️ Kỳ ảo / Light Novel (Sôi nổi, chuẩn bối cảnh)</option>
-                            <option value="selfhelp">💡 Kỹ năng / Self-Help (Truyền cảm hứng, gãy gọn)</option>
-                            <option value="academic">🔬 Học thuật / Khoa học (Chính xác, trang trọng)</option>
-                            <option value="classic">🏛️ Văn học Cổ điển (Uyên bác, tao nhã)</option>
-                        </select>
-                    </div>
-
-                    <!-- Character Pronoun Engine -->
-                    <div class="setting-group">
-                        <div class="group-header-with-action">
-                            <label class="group-label">Bảng xưng hô nhân vật:</label>
-                            <button id="btnAutoDetectChars" class="btn btn-primary btn-xs" title="Dùng AI phân tích sâu nhân vật, vai trò và cách xưng hô chuẩn xác">
-                                🤖 AI Tự phân tích nhân vật
-                            </button>
-                        </div>
-                        <p class="helper-text">Định nghĩa đại từ để giữ nguyên cách xưng hô (anh - em, tôi - cậu...) không bị lẫn lộn giữa các chương.</p>
-                        
-                        <div class="character-list" id="characterList">
-                            <!-- Populated dynamically -->
-                        </div>
-
-                        <button id="btnAddCharacter" class="btn btn-outline btn-sm full-width mt-2">
-                            ➕ Thêm nhân vật mới
-                        </button>
-                    </div>
-
-                    <!-- Glossary / Terms -->
-                    <div class="setting-group">
-                        <label class="group-label">Bảng thuật ngữ / Tên riêng:</label>
-                        <div class="terms-list" id="termsList">
-                            <!-- Populated dynamically -->
-                        </div>
-                        <button id="btnAddTerm" class="btn btn-outline btn-sm full-width mt-2">
-                            ➕ Thêm thuật ngữ
-                        </button>
-                    </div>
-
-                    <!-- Custom Prompt Instruction -->
-                    <div class="setting-group">
-                        <label class="group-label">Chỉ dẫn riêng của bạn (Tùy chọn):</label>
-                        <textarea id="customInstructions" class="styled-textarea" rows="3" placeholder="Ví dụ: Giữ nguyên từ 'Recon', xưng hô giữa Shin và Lena là tôi - cậu..."></textarea>
-                    </div>
-
-                    <button id="btnSaveGlossary" class="btn btn-primary full-width">
-                        💾 Lưu thiết lập văn phong
-                    </button>
+                    <div class="setting-group"><label class="group-label" for="toneSelect">Giọng văn</label><select id="toneSelect" class="styled-select full-width"><option value="novel">Tiểu thuyết / Văn học</option><option value="fantasy">Kỳ ảo / Light Novel</option><option value="selfhelp">Kỹ năng / Self-Help</option><option value="academic">Học thuật / Khoa học</option><option value="classic">Văn học cổ điển</option></select></div>
+                    <div class="setting-group"><div class="group-header-with-action"><span class="group-label">Nhân vật & xưng hô</span><button id="btnAutoDetectChars" class="btn btn-outline btn-xs" title="Dùng AI phân tích nhân vật">Phân tích AI</button></div><p class="helper-text">Định nghĩa đại từ để giữ cách xưng hô nhất quán giữa các chương.</p><div class="character-list" id="characterList"></div><button id="btnAddCharacter" class="btn btn-outline btn-sm full-width">Thêm nhân vật</button></div>
+                    <div class="setting-group"><span class="group-label">Thuật ngữ & tên riêng</span><div class="terms-list" id="termsList"></div><button id="btnAddTerm" class="btn btn-outline btn-sm full-width">Thêm thuật ngữ</button></div>
+                    <div class="setting-group"><label class="group-label" for="customInstructions">Chỉ dẫn riêng</label><textarea id="customInstructions" class="styled-textarea" rows="4" placeholder="Ví dụ: Giữ nguyên từ Recon; xưng hô giữa hai nhân vật là tôi – cậu."></textarea></div>
+                    <button id="btnSaveGlossary" class="btn btn-primary full-width">Lưu thiết lập</button>
                 </div>
             </aside>
         </main>
+        <footer class="app-footer" id="appFooter"><div class="footer-status"><span class="status-indicator" id="statusIndicator" aria-hidden="true"></span><span class="status-text" id="statusText" role="status">Hệ thống sẵn sàng</span></div><div class="footer-live-info" id="footerLiveInfo"><span id="footerCurrentChunk">Chưa chạy tác vụ</span></div><button id="btnToggleLogConsole" class="btn btn-text btn-sm" aria-controls="logConsoleDrawer">Nhật ký <span id="logCounterBadge" class="badge-mini">0</span></button></footer>
+        <section class="log-console-drawer hidden" id="logConsoleDrawer" aria-label="Nhật ký hoạt động"><div class="console-header"><span>Nhật ký hoạt động</span><div class="console-actions"><button class="btn-clear-log" id="btnClearLog">Xóa nhật ký</button><button class="btn-close-console" id="btnCloseLog" aria-label="Đóng nhật ký">×</button></div></div><div class="console-body" id="consoleBody"><div class="log-line info">[Sẵn sàng] AI Book Translator.</div></div></section>
 
-        <!-- LIVE ACTIVITY & LOG BAR -->
-        <footer class="app-footer" id="appFooter">
-            <div class="footer-status">
-                <span class="status-indicator" id="statusIndicator"></span>
-                <span class="status-text" id="statusText">Hệ thống sẵn sàng</span>
-            </div>
-            <div class="footer-live-info" id="footerLiveInfo">
-                <span id="footerCurrentChunk">Chưa chạy tác vụ nào</span>
-            </div>
-            <button id="btnToggleLogConsole" class="btn btn-text btn-sm">
-                📋 Nhật ký hoạt động (Logs) <span id="logCounterBadge" class="badge-mini">0</span>
-            </button>
-        </footer>
-
-        <!-- LOG CONSOLE DRAWER -->
-        <div class="log-console-drawer hidden" id="logConsoleDrawer">
-            <div class="console-header">
-                <span>Nhật ký thời gian thực</span>
-                <button class="btn-clear-log" id="btnClearLog">Xóa log</button>
-                <button class="btn-close-console" id="btnCloseLog">✕</button>
-            </div>
-            <div class="console-body" id="consoleBody">
-                <div class="log-line info">[Sẵn sàng] Khởi động AI Book Translator Pro.</div>
-            </div>
-        </div>
-
-        <!-- MODALS -->
-
-        <!-- Upload Book Modal -->
         <div class="modal-backdrop hidden" id="uploadModal">
-            <div class="modal-card">
-                <div class="modal-header">
-                    <h3>Tải Lên Sách Mới</h3>
-                    <button class="btn-close-modal" id="btnCloseUploadModal">✕</button>
-                </div>
+            <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="uploadModalTitle" tabindex="-1">
+                <div class="modal-header"><h2 id="uploadModalTitle">Tải sách mới</h2><button class="btn-close-modal" id="btnCloseUploadModal" aria-label="Đóng tải sách">×</button></div>
+                <div class="modal-body"><div class="dropzone" id="bookDropzone"><span class="eyebrow">NHẬP TÀI LIỆU</span><h3>Kéo thả file sách vào đây</h3><p>EPUB, PDF, DOCX, TXT hoặc MD · Tối đa 100 MiB</p><input type="file" id="bookFileInput" accept=".epub,.pdf,.docx,.txt,.md" class="hidden"><button class="btn btn-primary mt-2" onclick="document.getElementById('bookFileInput').click()">Chọn file từ máy tính</button></div><div id="uploadProgressContainer" class="hidden notice" role="status"><div class="progress-labels"><span id="uploadStatusText">Đang phân tích sách…</span></div><div class="progress-track"><div class="progress-fill indeterminate"></div></div></div></div>
+            </div>
+        </div>
+        <div class="modal-backdrop hidden" id="textbookModal">
+            <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="textbookModalTitle" tabindex="-1">
+                <div class="modal-header"><h2 id="textbookModalTitle">Chuyển giáo trình PDF → EPUB</h2><button class="btn-close-modal" id="btnCloseTextbookModal" aria-label="Đóng chuyển đổi giáo trình">×</button></div>
                 <div class="modal-body">
-                    <div class="dropzone" id="bookDropzone">
-                        <div class="dropzone-icon">📁</div>
-                        <h4>Kéo thả file sách vào đây</h4>
-                        <p>Hỗ trợ định dạng: <strong>EPUB, PDF, DOCX, TXT</strong></p>
-                        <input type="file" id="bookFileInput" accept=".epub,.pdf,.docx,.doc,.txt,.md" class="hidden">
-                        <button class="btn btn-primary mt-2" onclick="document.getElementById('bookFileInput').click()">
-                            Chọn file từ máy tính
-                        </button>
-                    </div>
-                    <div id="uploadProgressContainer" class="hidden mt-3">
-                        <div class="progress-labels">
-                            <span id="uploadStatusText">Đang phân tích sách...</span>
-                        </div>
-                        <div class="progress-track">
-                            <div class="progress-fill indeterminate"></div>
-                        </div>
-                    </div>
+                    <p class="modal-description">Chuyển giáo trình và sách tiếng Việt sang EPUB, giữ phân cấp chương và mục lục. Hỗ trợ PDF văn bản và bản scan; việc nhận dạng có thể sử dụng AI theo cấu hình hiện tại.</p>
+                    <div class="form-group"><label for="textbookExistingSelect">File PDF đã tải lên</label><select id="textbookExistingSelect" class="styled-select full-width"><option value="">Chọn file có sẵn hoặc tải file mới</option><option value="GIÁO TRÌNH CHỦ NGHĨA XÃ HỘI KHOA HỌC (K-2021).pdf">GIÁO TRÌNH CHỦ NGHĨA XÃ HỘI KHOA HỌC (K-2021).pdf</option></select><input type="file" id="textbookFileInput" accept=".pdf" class="hidden"><button type="button" class="btn btn-outline full-width" onclick="document.getElementById('textbookFileInput').click()">Chọn file PDF từ máy tính</button><div id="textbookSelectedFilename" class="selected-filename" role="status"></div></div>
+                    <div id="textbookProgressContainer" class="hidden notice" role="progressbar" aria-label="Tiến độ chuyển đổi giáo trình" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progress-labels"><strong id="textbookStatusTitle">Đang khởi động…</strong><span id="textbookPercentDisplay">0%</span></div><div class="progress-track"><div class="progress-fill" id="textbookProgressBar" style="width: 0%"></div></div><div id="textbookMessageDisplay" class="helper-text">Vui lòng chờ…</div></div>
+                    <div id="textbookSuccessBox" class="hidden notice" role="status"><h3 id="textbookSuccessTitle">Chuyển đổi hoàn tất</h3><p id="textbookSuccessMeta" class="helper-text"></p><div class="notice-actions"><a id="btnDownloadTextbookEpub" class="btn btn-primary" href="#" download>Tải EPUB</a><button id="btnOpenTextbookReader" class="btn btn-outline">Đọc trên web</button></div></div>
+                    <div class="modal-footer" id="textbookActionFooter"><button type="button" class="btn btn-outline" id="btnCancelTextbook">Đóng</button><button type="button" class="btn btn-primary" id="btnStartConvertTextbook">Bắt đầu chuyển đổi</button></div>
                 </div>
             </div>
         </div>
-
-        <!-- Settings Modal -->
         <div class="modal-backdrop hidden" id="settingsModal">
-            <div class="modal-card">
-                <div class="modal-header">
-                    <h3>⚙️ Cấu Hình AI & API Key</h3>
-                    <button class="btn-close-modal" id="btnCloseSettingsModal">✕</button>
-                </div>
+            <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle" tabindex="-1">
+                <div class="modal-header"><h2 id="settingsModalTitle">Cấu hình AI</h2><button class="btn-close-modal" id="btnCloseSettingsModal" aria-label="Đóng cấu hình">×</button></div>
                 <div class="modal-body">
-                    <div class="form-group">
-                        <label>Nhà cung cấp AI (Provider):</label>
-                        <select id="settingsProvider" class="styled-select full-width">
-                            <option value="gemini">Google Gemini (Khuyên dùng: Miễn phí, tốc độ cao, văn hay)</option>
-                            <option value="deepseek">DeepSeek AI (Chi phí cực rẻ, văn phong xuất sắc)</option>
-                            <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
-                            <option value="openrouter">OpenRouter (Claude 3.5 Sonnet, v.v.)</option>
-                            <option value="ollama">Ollama Local (Chạy mô hình offline trên máy)</option>
-                            <option value="free_fallback">Dùng thử miễn phí (Không cần API Key)</option>
-                        </select>
-                    </div>
-
+                    <div class="form-group"><label for="settingsProvider">Nhà cung cấp</label><select id="settingsProvider" class="styled-select full-width"><option value="gemini">Google Gemini</option><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option><option value="ollama">Ollama Local</option><option value="free_fallback">Dùng thử không cần API key</option></select></div>
                     <div class="form-group" id="groupApiKey">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
-                            <label style="margin: 0;">API Key (Hỗ trợ 1 hoặc NHIỀU Key chạy song song):</label>
-                            <span id="keyCountBadge" class="badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8; font-size: 0.75rem; padding: 2px 8px; border-radius: 6px; display: none;">1 Key</span>
-                        </div>
-                        <textarea id="settingsApiKey" class="styled-input full-width" rows="3" style="resize: vertical; font-family: monospace; font-size: 0.85rem;" placeholder="Nhập 1 Key hoặc dán NHIỀU API Key (mỗi key 1 dòng hoặc cách nhau bằng dấu phẩy)..."></textarea>
-                        <div id="multiKeyNotice" style="display: none; margin-top: 6px; padding: 8px 12px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; font-size: 0.82rem; color: #34d399;">
-                            ⚡ <strong>Chế độ dịch song song đa luồng:</strong> Hệ thống nhận diện <strong id="multiKeyCount">0</strong> API Keys. Các đoạn sách sẽ được dịch đồng thời để nhân tốc độ lên gấp <strong id="multiKeyMultiplier">0</strong> lần!
-                        </div>
-                        <small class="helper-text" id="apiKeyHelp" style="margin-top: 6px;">
-                            👉 Lấy Google Gemini API Key miễn phí tại: <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: #818cf8; text-decoration: underline;">Google AI Studio</a>. <em>Mẹo:</em> Dùng nhiều tài khoản Gmail để lấy nhiều key dán vào đây, dịch siêu tốc mà không lo chạm hạn mức!
-                        </small>
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
-                            <button type="button" id="btnCheckQuota" class="btn btn-secondary" style="padding: 5px 12px; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 6px;">
-                                <span>🔍</span> Kiểm tra Quota & Sức khỏe Key
-                            </button>
-                            <span id="quotaCheckSpinner" style="display: none; font-size: 0.78rem; color: #818cf8;">⏳ Đang kiểm tra từng Key...</span>
-                        </div>
-                        <div id="quotaCheckResults" style="display: none; margin-top: 8px; max-height: 220px; overflow-y: auto; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 6px 10px;">
-                        </div>
+                        <div class="form-label-row"><label for="settingsApiKey">API key</label><span id="keyCountBadge" class="badge" style="display: none"></span></div>
+                        <textarea id="settingsApiKey" class="styled-textarea full-width api-key-input" rows="3" placeholder="Mỗi key một dòng, hoặc phân cách bằng dấu phẩy."></textarea>
+                        <div id="multiKeyNotice" class="notice helper-text" style="display: none"><strong id="multiKeyCount">0</strong> key được nhận diện. Có thể dùng tối đa <strong id="multiKeyMultiplier">0</strong> luồng; tốc độ thực tế phụ thuộc hạn mức của nhà cung cấp.</div>
+                        <small class="helper-text" id="apiKeyHelp">Tạo Gemini API key tại <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>. Không chia sẻ key hoặc file cấu hình.</small>
+                        <div class="quota-actions"><button type="button" id="btnCheckQuota" class="btn btn-outline btn-sm">Kiểm tra hạn mức</button><span id="quotaCheckSpinner" class="helper-text" style="display: none" role="status">Đang kiểm tra…</span></div>
+                        <div id="quotaCheckResults" class="quota-results" style="display: none"></div>
                     </div>
-
-                    <div class="form-group" id="groupModel">
-                        <label>Mô hình AI (Model):</label>
-                        <select id="settingsModelSelect" class="styled-select full-width mb-1">
-                            <option value="gemini-3.5-flash">gemini-3.5-flash (Khuyên dùng: Hạn mức cao, tốc độ cao, văn mượt)</option>
-                            <option value="gemini-flash-latest">gemini-flash-latest (Bản Flash mới nhất)</option>
-                            <option value="gemini-3.6-flash">gemini-3.6-flash (Bản Flash Preview)</option>
-                            <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Gemini Pro: Đỉnh cao văn học)</option>
-                            <option value="custom">✏️ Nhập tên mô hình khác...</option>
-                        </select>
-                        <input type="text" id="settingsModel" class="styled-input full-width hidden" placeholder="Nhập tên mô hình (ví dụ: gemini-3.5-flash)">
-                        <small class="helper-text" id="modelHelpText">👉 Khuyên dùng: <strong>gemini-3.5-flash</strong> (Dịch nhanh, chuẩn ngữ cảnh, hạn mức dồi dào).</small>
-                    </div>
-
-                    <div class="form-group hidden" id="groupBaseUrl">
-                        <label>API Base URL (Dành cho DeepSeek, OpenRouter, Ollama):</label>
-                        <input type="text" id="settingsBaseUrl" class="styled-input full-width" placeholder="https://api.deepseek.com/v1">
-                    </div>
-
-                    <div class="form-group">
-                        <label>Độ sáng tạo (Temperature: <span id="tempValueDisplay">0.3</span>):</label>
-                        <input type="range" id="settingsTemp" min="0.0" max="1.0" step="0.05" value="0.3" class="full-width">
-                        <small class="helper-text">0.2 - 0.4: Văn phong chuẩn xác, ổn định | 0.5 - 0.7: Giàu cảm xúc văn chương hơn.</small>
-                    </div>
-
-                    <div class="modal-footer">
-                        <button id="btnSaveSettings" class="btn btn-primary full-width">
-                            Lưu Cấu Hình
-                        </button>
-                    </div>
+                    <div class="form-group" id="groupModel"><label for="settingsModelSelect">Mô hình</label><select id="settingsModelSelect" class="styled-select full-width"><option value="gemini-3.5-flash">gemini-3.5-flash</option><option value="gemini-flash-latest">gemini-flash-latest</option><option value="gemini-3.6-flash">gemini-3.6-flash</option><option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview</option><option value="custom">Nhập tên mô hình khác</option></select><label for="settingsModel" class="sr-only">Tên mô hình tùy chỉnh</label><input type="text" id="settingsModel" class="styled-input full-width hidden" placeholder="Tên mô hình tùy chỉnh"><small class="helper-text" id="modelHelpText">Chọn mô hình tương thích với nhà cung cấp và hạn mức của bạn.</small></div>
+                    <div class="form-group hidden" id="groupBaseUrl"><label for="settingsBaseUrl">API Base URL</label><input type="url" id="settingsBaseUrl" class="styled-input full-width" placeholder="https://api.deepseek.com/v1"></div>
+                    <div class="form-group"><label for="settingsTemp">Độ sáng tạo <span id="tempValueDisplay">0.3</span></label><input type="range" id="settingsTemp" min="0.0" max="1.0" step="0.05" value="0.3" class="full-width"><small class="helper-text">0.2–0.4 ưu tiên ổn định; 0.5–0.7 cho phép cách diễn đạt linh hoạt hơn.</small></div>
+                    <div class="modal-footer"><button id="btnSaveSettings" class="btn btn-primary">Lưu cấu hình</button></div>
                 </div>
             </div>
         </div>
-
-        <!-- Export Modal -->
         <div class="modal-backdrop hidden" id="exportModal">
-            <div class="modal-card">
-                <div class="modal-header">
-                    <h3>📥 Xuất Bản Sách</h3>
-                    <button class="btn-close-modal" id="btnCloseExportModal">✕</button>
-                </div>
-                <div class="modal-body">
-                    <p class="export-desc">Chọn định dạng sách bạn muốn tải về máy tính:</p>
-
-                    <div class="export-grid">
-                        <div class="export-card" onclick="app.downloadBook('epub')">
-                            <div class="export-icon">📱</div>
-                            <div class="export-info">
-                                <strong>Sách EPUB (Tiếng Việt)</strong>
-                                <span>Giữ trọn bìa sách, ảnh minh họa. Đọc trên Kindle, Kobo, Apple Books.</span>
-                            </div>
-                            <button class="btn btn-outline btn-xs">Tải về</button>
-                        </div>
-
-                        <div class="export-card highlight" onclick="app.downloadBook('bilingual-epub')">
-                            <div class="export-icon">📖</div>
-                            <div class="export-info">
-                                <strong>Sách EPUB Song Ngữ (Anh - Việt)</strong>
-                                <span>Mỗi đoạn tiếng Anh kèm tiếng Việt. Hoàn hảo để đọc học ngoại ngữ!</span>
-                            </div>
-                            <button class="btn btn-primary btn-xs">Tải về</button>
-                        </div>
-
-                        <div class="export-card" onclick="app.downloadBook('docx')">
-                            <div class="export-icon">📄</div>
-                            <div class="export-info">
-                                <strong>Tài liệu Word (.DOCX)</strong>
-                                <span>Định dạng chuẩn trang bìa, mục lục, dễ dàng in ấn và chỉnh sửa.</span>
-                            </div>
-                            <button class="btn btn-outline btn-xs">Tải về</button>
-                        </div>
-
-                        <div class="export-card" onclick="app.downloadBook('html')">
-                            <div class="export-icon">🌐</div>
-                            <div class="export-info">
-                                <strong>Web Sách HTML / In PDF</strong>
-                                <span>Đọc mượt mà trên mọi trình duyệt, hỗ trợ phím Ctrl+P để lưu thành PDF.</span>
-                            </div>
-                            <button class="btn btn-outline btn-xs">Tải về</button>
-                        </div>
-
-                        <div class="export-card" onclick="app.downloadBook('txt')">
-                            <div class="export-icon">📝</div>
-                            <div class="export-info">
-                                <strong>Văn bản thuần (.TXT)</strong>
-                                <span>Nhẹ nhất, tương thích mọi thiết bị máy đọc sách cũ.</span>
-                            </div>
-                            <button class="btn btn-outline btn-xs">Tải về</button>
-                        </div>
-                    </div>
-                </div>
+            <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle" tabindex="-1">
+                <div class="modal-header"><h2 id="exportModalTitle">Xuất sách</h2><button class="btn-close-modal" id="btnCloseExportModal" aria-label="Đóng xuất sách">×</button></div>
+                <div class="modal-body"><p class="modal-description">Chọn định dạng tải về. Bản dịch và hình ảnh hiện có sẽ được sử dụng khi xuất.</p><div class="export-grid">
+                    <button class="export-card" onclick="app.downloadBook('epub')"><span class="export-format">EPUB</span><span class="export-info"><strong>Bản tiếng Việt</strong><span>Dành cho Kindle, Kobo và ứng dụng đọc sách.</span></span><span class="export-download">Tải về</span></button>
+                    <button class="export-card" onclick="app.downloadBook('bilingual-epub')"><span class="export-format">EPUB</span><span class="export-info"><strong>Bản song ngữ Anh – Việt</strong><span>Đối chiếu từng đoạn bản gốc và bản dịch.</span></span><span class="export-download">Tải về</span></button>
+                    <button class="export-card" onclick="app.downloadBook('docx')"><span class="export-format">DOCX</span><span class="export-info"><strong>Tài liệu Word</strong><span>Tiếp tục biên tập hoặc chuẩn bị bản in.</span></span><span class="export-download">Tải về</span></button>
+                    <button class="export-card" onclick="app.downloadBook('html')"><span class="export-format">HTML</span><span class="export-info"><strong>Đọc trên web / In PDF</strong><span>Dùng chức năng in của trình duyệt để lưu PDF.</span></span><span class="export-download">Tải về</span></button>
+                    <button class="export-card" onclick="app.downloadBook('txt')"><span class="export-format">TXT</span><span class="export-info"><strong>Văn bản thuần</strong><span>Không kèm hình ảnh hay định dạng trang.</span></span><span class="export-download">Tải về</span></button>
+                </div></div>
             </div>
         </div>
-
-        <!-- Delete Confirmation Modal -->
         <div class="modal-backdrop hidden" id="deleteConfirmModal">
-            <div class="modal-card" style="max-width: 460px;">
-                <div class="modal-header">
-                    <h3>🗑️ Xác Nhận Xóa</h3>
-                    <button class="btn-close-modal" id="btnCloseDeleteModal">✕</button>
-                </div>
-                <div class="modal-body">
-                    <p style="font-size: 13.5px; color: var(--text-main); margin-bottom: 8px;">
-                        Bạn có chắc chắn muốn xóa bài báo / cuốn sách này không?
-                    </p>
-                    <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px;">
-                        <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #f87171; font-weight: 700; display: block; margin-bottom: 4px;">Dự án đang chọn:</span>
-                        <strong id="deleteProjectTitleDisplay" style="color: #fca5a5; font-size: 14px; word-break: break-word; display: block;">Chưa chọn</strong>
-                    </div>
-                    <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5; margin: 0;">
-                        ⚠️ Thao tác này sẽ dừng tiến trình dịch (nếu có) và xóa vĩnh viễn toàn bộ dữ liệu chương, bản dịch song ngữ và các hình ảnh trích xuất của bài này.
-                    </p>
-                    <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-color);">
-                        <button type="button" class="btn btn-outline" id="btnCancelDelete">
-                            Hủy bỏ
-                        </button>
-                        <button type="button" class="btn btn-outline-danger" id="btnConfirmDeleteAction" style="background: #ef4444; color: #fff; border-color: #dc2626;">
-                            🗑️ Xóa Vĩnh Viễn
-                        </button>
-                    </div>
-                </div>
+            <div class="modal-card modal-card-small" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle" aria-describedby="deleteWarning" tabindex="-1">
+                <div class="modal-header"><h2 id="deleteModalTitle">Xóa dự án</h2><button class="btn-close-modal" id="btnCloseDeleteModal" aria-label="Đóng xác nhận xóa">×</button></div>
+                <div class="modal-body"><p>Xóa vĩnh viễn dự án đang chọn?</p><div class="notice"><span class="eyebrow">DỰ ÁN</span><strong id="deleteProjectTitleDisplay">Chưa chọn</strong></div><p id="deleteWarning" class="helper-text">Toàn bộ chương, bản dịch và hình ảnh của dự án sẽ bị xóa. Không thể hoàn tác. Nếu đang dịch, hãy dừng và chờ tiến trình kết thúc trước khi xóa.</p><div class="modal-footer"><button type="button" class="btn btn-outline" id="btnCancelDelete">Hủy bỏ</button><button type="button" class="btn btn-primary" id="btnConfirmDeleteAction">Xóa vĩnh viễn</button></div></div>
             </div>
         </div>
-
     </div>
-
-    <!-- Application Script -->
-    <script src="/static/app.js?v=3.3.1"></script>
+    <script src="/static/app.js?v=4.0.0"></script>
 </body>
 </html>
