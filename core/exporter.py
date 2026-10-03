@@ -304,9 +304,20 @@ def format_caption_text(text: str) -> tuple[str, str]:
 
 def is_academic_paper(project: BookProject) -> bool:
     """Checks if project appears to be a scientific paper."""
+    if project.document_type:
+        return project.document_type == "paper"
     if project.source_format == "pdf":
         return any(c.title.strip().lower() in ("abstract", "tóm tắt", "phần mở đầu / tiêu đề") for c in project.chapters)
     return any(c.title.strip().lower() in ("abstract", "tóm tắt") for c in project.chapters)
+
+
+def _first_para_duplicates_title(chapter: BookChapter) -> bool:
+    """Keep the translatable source heading instead of adding a second title."""
+    if not chapter.paragraphs:
+        return False
+    first = chapter.paragraphs[0]
+    return (first.tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6')
+            and ' '.join(first.original_text.split()) == ' '.join(chapter.title.split()))
 
 
 class BookExporter:
@@ -332,14 +343,19 @@ class BookExporter:
         Modifies the original EPUB zip archive by substituting translated text in XHTML files.
         Guarantees 100% preservation of images, CSS, fonts, and cover.
         """
-        # Map paragraph IDs to their translations
-        para_map = {}
-        for chap in project.chapters:
-            for p in chap.paragraphs:
-                para_map[p.id] = p
+        from core.epub_structure import epub_text_elements
+        import posixpath
+        from urllib.parse import unquote
 
-        # Map document names to chapters
-        doc_chap_map = {c.doc_name: c for c in project.chapters if c.doc_name}
+        def normalized_doc(name):
+            return posixpath.normpath(unquote(name).replace(chr(92), '/')).lstrip('/')
+
+        source_paras = {}
+        for chapter in project.chapters:
+            for paragraph in chapter.paragraphs:
+                name = paragraph.source_doc or chapter.doc_name
+                if name:
+                    source_paras.setdefault(normalized_doc(name), []).append(paragraph)
 
         temp_dir = tempfile.mkdtemp(prefix="epub_export_")
         try:
@@ -352,46 +368,58 @@ class BookExporter:
                     ext = os.path.splitext(f)[1].lower()
                     if ext in ('.xhtml', '.html', '.htm'):
                         rel_path = os.path.relpath(os.path.join(root, f), temp_dir).replace('\\', '/')
-                        # Check matching document
-                        target_chap = None
-                        for chap in project.chapters:
-                            if chap.doc_name and (chap.doc_name in rel_path or rel_path.endswith(chap.doc_name)):
-                                target_chap = chap
-                                break
-
-                        if target_chap:
-                            file_full = os.path.join(root, f)
-                            with open(file_full, 'r', encoding='utf-8', errors='ignore') as xf:
-                                content = xf.read()
-
-                            soup = BeautifulSoup(content, 'html.parser')
-                            raw_tags = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'blockquote', 'li', 'div'])
-                            tags = [t for t in raw_tags if not (t.name == 'div' and t.find(['p', 'div', 'blockquote']))]
-
-                            for p in target_chap.paragraphs:
-                                trans = p.translated_text.strip()
-                                if not trans:
-                                    continue
-
-                                # Match tag by text
-                                for t in tags:
-                                    if t.get_text(strip=True) == p.original_text.strip():
-                                        if bilingual:
-                                            # Bilingual: original in smaller italic or gray, followed by translated
-                                            t.clear()
-                                            en_span = soup.new_tag("div")
-                                            en_span['style'] = "color: #718096; font-size: 0.9em; margin-bottom: 4px; font-style: italic;"
-                                            en_span.string = p.original_text
-                                            vi_span = soup.new_tag("div")
-                                            vi_span.string = trans
-                                            t.append(en_span)
-                                            t.append(vi_span)
-                                        else:
-                                            t.string = trans
-                                        break
-
-                            with open(file_full, 'w', encoding='utf-8') as xf:
-                                xf.write(str(soup))
+                        matching = [name for name in source_paras
+                                    if rel_path == name or rel_path.endswith('/' + name)]
+                        if not matching:
+                            continue
+                        # Longest suffix disambiguates same basenames in different folders.
+                        name = max(matching, key=len)
+                        file_full = os.path.join(root, f)
+                        with open(file_full, 'r', encoding='utf-8', errors='ignore') as xf:
+                            content = xf.read()
+                        soup = BeautifulSoup(content, 'html.parser')
+                        elements = epub_text_elements(soup)
+                        legacy_tags = soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'blockquote', 'li', 'div'])
+                        legacy_tags = [t for t in legacy_tags if not (t.name == 'div' and t.find(['p', 'div', 'blockquote']))]
+                        used = set()
+                        for paragraph in source_paras[name]:
+                            target = None
+                            position = paragraph.source_element_index
+                            if position >= 0:
+                                if position < len(elements):
+                                    target = elements[position]
+                            else:
+                                # Older projects have no locator; consume text matches in order.
+                                target = next((t for t in legacy_tags if id(t) not in used
+                                               and t.get_text(strip=True) == paragraph.original_text.strip()), None)
+                            if target is None or id(target) in used:
+                                continue
+                            used.add(id(target))
+                            trans = paragraph.translated_text.strip()
+                            if not trans:
+                                continue
+                            if bilingual:
+                                original = soup.new_tag('span')
+                                original['style'] = 'display:block;color:#718096;font-size:0.9em;font-style:italic;'
+                                original.string = paragraph.original_text
+                                translated = soup.new_tag('span')
+                                translated['style'] = 'display:block;'
+                                translated.string = trans
+                                # Keep images and non-text elements in their original position.
+                                for text_node in list(target.find_all(string=True)):
+                                    text_node.extract()
+                                target.append(original)
+                                target.append(translated)
+                            else:
+                                text_nodes = list(target.find_all(string=True))
+                                if text_nodes:
+                                    text_nodes[0].replace_with(trans)
+                                    for text_node in text_nodes[1:]:
+                                        text_node.extract()
+                                else:
+                                    target.append(trans)
+                        with open(file_full, 'w', encoding='utf-8') as xf:
+                            xf.write(str(soup))
 
             # Repack zip as EPUB
             if os.path.exists(output_path):
@@ -421,10 +449,12 @@ class BookExporter:
         book = epub.EpubBook()
         book.set_identifier(f"ai-book-{project.id}")
         is_vn_original = (
-            getattr(project, "is_textbook", False) or
+            project.document_type == "textbook" or
             "giáo trình" in project.title.lower() or
             "bộ giáo dục" in project.author.lower() or
-            (bool(project.chapters) and all(p.original_text == p.translated_text for p in project.chapters[0].paragraphs[:10] if p.translated_text))
+            (bool(project.chapters)
+             and any(p.translated_text for p in project.chapters[0].paragraphs[:10])
+             and all(p.original_text == p.translated_text for p in project.chapters[0].paragraphs[:10] if p.translated_text))
         )
         if bilingual:
             book_title = normalize_text(f"{project.title} (Song Ngữ Anh - Việt)")
@@ -641,7 +671,7 @@ class BookExporter:
             c_item = epub.EpubHtml(title=chap_title, file_name=f"chap_{i}.xhtml", lang="vi")
             c_item.add_item(default_css)
 
-            if chap_title in ("Phần mở đầu / Tiêu đề", "Title", "Header"):
+            if chap_title in ("Phần mở đầu / Tiêu đề", "Title", "Header") or _first_para_duplicates_title(chap):
                 html_parts = []
             else:
                 html_parts = [f"<h2>{chap_title}</h2>"]
@@ -736,10 +766,11 @@ class BookExporter:
 
                 if bilingual:
                     orig_html, _ = format_math_for_epub(p.original_text, math_store)
+                    tag = p.tag if p.tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote') else 'p'
                     html_parts.append(f'<div class="bilingual-en">{orig_html}</div>')
-                    html_parts.append(f'<p class="bilingual-vi">{trans_html}</p>')
+                    html_parts.append(f'<{tag} class="bilingual-vi">{trans_html}</{tag}>')
                 else:
-                    tag = p.tag if p.tag in ('h1', 'h2', 'h3', 'h4', 'blockquote') else 'p'
+                    tag = p.tag if p.tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote') else 'p'
                     if trans_html.startswith('<div class="math-block'):
                         parts = trans_html.split('\n', 1)
                         if len(parts) == 2 and parts[1].strip():
@@ -840,7 +871,7 @@ class BookExporter:
             chap_title = normalize_text(chap.title)
 
             # Chapter heading (left-aligned for all academic and modern documents)
-            if chap_title not in ("Phần mở đầu / Tiêu đề", "Title", "Header"):
+            if chap_title not in ("Phần mở đầu / Tiêu đề", "Title", "Header") and not _first_para_duplicates_title(chap):
                 heading = doc.add_heading(chap_title, level=1)
                 heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 heading.paragraph_format.space_before = Pt(22)
@@ -975,9 +1006,19 @@ class BookExporter:
                     p_idx += 1
                     continue
 
-                # Subheadings (h3, h4)
-                if p.tag == 'h3':
-                    h3_p = doc.add_paragraph()
+                # Source headings remain headings, including translated section titles.
+                if p.tag in ('h1', 'h2', 'h5', 'h6'):
+                    heading = doc.add_heading(level=int(p.tag[1]))
+                    heading.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                    if bilingual:
+                        original = heading.add_run(format_math_for_docx(p.original_text) + "\n")
+                        original.font.italic = True
+                        original.font.color.rgb = RGBColor(100, 116, 139)
+                    heading.add_run(trans)
+                    p_idx += 1
+                    continue
+                elif p.tag == 'h3':
+                    h3_p = doc.add_heading(level=3)
                     h3_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
                     h3_p.paragraph_format.space_before = Pt(14)
                     h3_p.paragraph_format.space_after = Pt(4)
@@ -996,7 +1037,7 @@ class BookExporter:
                     p_idx += 1
                     continue
                 elif p.tag == 'h4':
-                    h4_p = doc.add_paragraph()
+                    h4_p = doc.add_heading(level=4)
                     h4_p.alignment = WD_ALIGN_PARAGRAPH.LEFT
                     h4_p.paragraph_format.space_before = Pt(10)
                     h4_p.paragraph_format.space_after = Pt(2)
@@ -1165,7 +1206,7 @@ class BookExporter:
 
                 if bilingual:
                     orig_html, _ = format_math_in_html(p.original_text)
-                    is_h = p.tag in ('h1', 'h2', 'h3', 'h4')
+                    is_h = p.tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6')
                     if is_h:
                         chap_body.append(f'''
                         <div class="heading-pair {p.tag}-pair" style="margin-top: 1.6em; margin-bottom: 0.6em;">
@@ -1179,7 +1220,7 @@ class BookExporter:
                             <div class="vi">{trans_html}</div>
                         </div>''')
                 else:
-                    tag = p.tag if p.tag in ('h1', 'h2', 'h3', 'h4', 'blockquote') else 'p'
+                    tag = p.tag if p.tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote') else 'p'
                     if trans_html.startswith('<div class="math-block'):
                         parts = trans_html.split('\n', 1)
                         if len(parts) == 2 and parts[1].strip():
@@ -1193,7 +1234,7 @@ class BookExporter:
                 p_idx += 1
 
             # Chapter heading (left-aligned; suppress generic preamble title)
-            if chap_title in ("Phần mở đầu / Tiêu đề", "Title", "Header"):
+            if chap_title in ("Phần mở đầu / Tiêu đề", "Title", "Header") or _first_para_duplicates_title(chap):
                 h2_tag = ""
             else:
                 h2_tag = f"<h2>{chap_title}</h2>"
@@ -1518,7 +1559,8 @@ class BookExporter:
         ]
 
         for chap in project.chapters:
-            lines.append(f"\n\n--- {chap.title} ---\n")
+            if not _first_para_duplicates_title(chap):
+                lines.append(f"\n\n--- {chap.title} ---\n")
             for p in chap.paragraphs:
                 trans = p.translated_text.strip() if p.translated_text.strip() else p.original_text
                 if bilingual:

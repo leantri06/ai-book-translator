@@ -459,8 +459,8 @@ class TextbookParser:
             author=author,
             source_path=file_path
         )
-        # Mark project as textbook
-        setattr(project, "is_textbook", True)
+        # Mark project as textbook via the explicit document_type field
+        project.document_type = "textbook"
 
         # Save project to data/projects/{pid}
         from server.database import ProjectManager

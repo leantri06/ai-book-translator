@@ -3,6 +3,10 @@ name: Editorial Workbench
 colors:
   primary: "#E9E9E7"
   primary-hover: "#FFFFFF"
+  paper-accent: "#79BDCC"
+  paper-hover: "#9AD5E2"
+  novel-accent: "#B49EDB"
+  novel-hover: "#CBB8E9"
   surface: "#171717"
   surface-elevated: "#222222"
   background: "#111111"
@@ -43,7 +47,7 @@ components:
 A focused translation and reading workspace. The document is the main visual element; controls support editing without competing for attention. Preserve the existing Vietnamese interface and all translation, glossary, export and textbook-conversion flows.
 
 ## Colors
-Neutral graphite surfaces, off-white text and restrained gray borders only. Status is named in text, never conveyed by color alone. The primary action uses an off-white fill with dark text; secondary actions use solid surfaces and borders. Progress uses a single off-white fill with a visible numeric percentage, not a categorical color palette.
+Neutral graphite surfaces and off-white reading text, with restrained teal accents for Paper and violet for Novel. Textbook remains neutral. The upload dialog uses its own selected type rather than changing the active project's theme. Paper/Novel buttons and project prefixes name the workflow explicitly; color is supplementary. Status is named in text, never conveyed by color alone. Primary actions and progress use the current workflow accent with numeric progress; persistent structure warnings use a subdued amber border and readable text.
 
 ## Typography
 Use locally available system fonts so the interface works without third-party font requests. Georgia distinguishes book content from UI. Labels are concise; avoid exaggerated claims about quality, quota or speed. Body text must meet WCAG AA contrast on its surface.
@@ -61,7 +65,8 @@ All UI corners are square, including buttons, fields, badges, progress tracks, p
 - Buttons: short text labels, visible keyboard focus, clear disabled/loading feedback.
 - Navigation: keyboard-operable chapter buttons and view tabs; accessible expanded/selected state.
 - Modals: dialog semantics, focus containment, Escape dismissal, return focus to the initiating control.
-- Progress: numeric labels, accessible progress values, one neutral fill. Upload indeterminate animation is subtle.
+- Progress: numeric labels, accessible progress values and one workflow accent fill. Upload indeterminate animation is subtle and stops on failure.
+- Workflows: separate Paper PDF and Novel ebook entry buttons, explicit upload mode and file restrictions, shared workspace. Paper uses section labels and locked academic tone; only the character group is hidden, not terminology or custom instructions.
 - Notices: border and explicit text, no celebratory illustrations or warning emoji.
 - Quota: named states and model details, not colored dots.
 

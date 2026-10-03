@@ -92,7 +92,7 @@ class EndpointTests(unittest.TestCase):
     def test_failed_parse_cleans_upload(self):
         with patch("server.app.BookParser.parse_file", side_effect=ValueError("broken book")):
             response = self.client.post("/api/projects/upload", files={"file": ("broken.epub", b"invalid")})
-        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 400)
         self.assertEqual(os.listdir(self.storage.name), [])
 
     def test_missing_chapter_does_not_start_worker(self):

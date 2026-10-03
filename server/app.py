@@ -207,12 +207,28 @@ def list_projects():
 
 
 @app.post("/api/projects/upload")
-def upload_book(file: UploadFile = File(...)):
+def upload_book(file: UploadFile = File(...), document_type: Optional[str] = Form(None)):
     """Uploads a book file, parses it, and creates a new project."""
     filename = os.path.basename((file.filename or "").replace("\\", "/"))
     ext = os.path.splitext(filename)[1].lower()
     if ext not in (".epub", ".pdf", ".docx", ".txt", ".md"):
         raise HTTPException(status_code=400, detail="Định dạng file không hỗ trợ. Vui lòng tải file EPUB, PDF, DOCX, TXT.")
+
+    # Validate document_type vs extension BEFORE saving the file
+    mode = None
+    if document_type and document_type.strip():
+        mode = document_type.strip().lower()
+        allowed_ext_map = {
+            "paper": {".pdf"},
+            "novel": {".epub", ".docx", ".txt", ".md"},
+        }
+        if mode not in allowed_ext_map:
+            raise HTTPException(status_code=400, detail="Chọn Paper hoặc Novel; chuyển giáo trình dùng chức năng riêng.")
+        if ext not in allowed_ext_map[mode]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document type '{mode}' is not compatible with file extension '{ext}'."
+            )
 
     import uuid
     project_id = uuid.uuid4().hex
@@ -228,11 +244,18 @@ def upload_book(file: UploadFile = File(...)):
                 buffer.write(block)
         if not total_bytes:
             raise HTTPException(status_code=400, detail="Empty upload")
-        project = BookParser.parse_file(save_path, project_id)
+        if mode:
+            project = BookParser.parse_file(save_path, project_id, document_type=mode)
+        else:
+            project = BookParser.parse_file(save_path, project_id)
         if ext in (".txt", ".md"):
             project.title = os.path.splitext(filename)[0]
-        # Pre-seed glossary with default novel tone
+        # Pre-seed glossary: academic tone for paper, novel for everything else
         glossary = BookGlossary()
+        if project.document_type == "paper":
+            glossary.tone = "academic"
+        else:
+            glossary.tone = "novel"
         ProjectManager.save_new_project(project, glossary)
         return {
             "status": "ok",
@@ -241,7 +264,9 @@ def upload_book(file: UploadFile = File(...)):
             "author": project.author,
             "chapters_count": project.total_chapters,
             "paragraphs_count": project.total_paragraphs,
-            "words_count": project.total_words
+            "words_count": project.total_words,
+            "document_type": project.document_type,
+            "structure_warnings": list(project.structure_warnings),
         }
     except Exception as e:
         if os.path.isfile(save_path):
@@ -251,6 +276,8 @@ def upload_book(file: UploadFile = File(...)):
             shutil.rmtree(partial_project)
         if isinstance(e, HTTPException):
             raise
+        if isinstance(e, ValueError):
+            raise HTTPException(status_code=400, detail=f"Lỗi khi đọc file: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Lỗi khi đọc file: {str(e)}")
     finally:
         file.file.close()
@@ -285,7 +312,9 @@ def get_project_details(project_id: str):
         "progress_percent": project.progress_percent,
         "total_words": project.total_words,
         "chapters": chapters_summary,
-        "is_translating": worker_instance.is_running(project_id)
+        "is_translating": worker_instance.is_running(project_id),
+        "document_type": project.document_type,
+        "structure_warnings": list(project.structure_warnings),
     }
 
 
@@ -397,13 +426,29 @@ def translation_status(project_id: str):
 
 @app.get("/api/projects/{project_id}/glossary")
 def get_glossary(project_id: str):
+    project = ProjectManager.load_project(project_id, load_all_paragraphs=False)
+    if not project:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dự án")
     glossary = ProjectManager.load_glossary(project_id)
+    # Normalize tone by project type
+    if project.document_type == "paper" and glossary.tone != "academic":
+        glossary.tone = "academic"
+    elif project.document_type == "novel" and glossary.tone == "academic":
+        glossary.tone = "novel"
     return glossary.to_dict()
 
 
 @app.post("/api/projects/{project_id}/glossary")
 def save_glossary(project_id: str, data: GlossaryUpdateModel):
+    project = ProjectManager.load_project(project_id, load_all_paragraphs=False)
+    if not project:
+        raise HTTPException(status_code=404, detail="Không tìm thấy dự án")
     glossary = BookGlossary.from_dict(data.model_dump())
+    # Normalize tone by project type
+    if project.document_type == "paper":
+        glossary.tone = "academic"
+    elif project.document_type == "novel" and glossary.tone == "academic":
+        glossary.tone = "novel"
     ProjectManager.save_glossary(project_id, glossary)
     return {"status": "ok", "message": "Đã lưu bảng thuật ngữ và quy tắc xưng hô."}
 
@@ -421,6 +466,13 @@ def auto_detect_characters(project_id: str):
     project = ProjectManager.load_project(project_id, load_all_paragraphs=False)
     if not project:
         raise HTTPException(status_code=404, detail="Không tìm thấy dự án")
+
+    # Paper/academic projects should not use literature-style character auto-detection
+    if project.document_type == "paper":
+        raise HTTPException(
+            status_code=400,
+            detail="Auto-detect characters is not available for academic paper projects."
+        )
 
     settings = ProjectManager.get_settings()
     api_key = settings.get("api_key", "")
@@ -486,10 +538,9 @@ BẮT BUỘC trả về duy nhất định dạng JSON (mảng các object):
                         added_names.append(name)
 
                 ProjectManager.save_glossary(project_id, existing_glossary)
-                worker_instance.broadcast(project_id, "log", {
-                    "level": "success",
-                    "text": f"AI đã tự động phân tích thành công {len(added_names)} nhân vật và quy tắc xưng hô cho '{project.title}'!"
-                })
+                worker_instance.add_log(project_id, "success",
+                    f"AI đã tự động phân tích thành công {len(added_names)} nhân vật và quy tắc xưng hô cho '{project.title}'!"
+                )
                 return {
                     "status": "ok",
                     "detected_count": len(added_names),

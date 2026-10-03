@@ -29,6 +29,8 @@ class BookParagraph:
     css_class: str = ""
     notes: str = ""
     image_path: str = ""
+    source_doc: str = ""
+    source_element_index: int = -1
 
 
 @dataclass
@@ -70,6 +72,8 @@ class BookProject:
     chapters: List[BookChapter] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
+    document_type: str = ""  # legacy projects may not have an explicit workflow
+    structure_warnings: List[str] = field(default_factory=list)
 
     @property
     def total_chapters(self) -> int:
@@ -99,154 +103,41 @@ class BookParser:
     """Detects format and parses book files into structured chapters and paragraphs."""
 
     @staticmethod
-    def parse_file(file_path: str, project_id: Optional[str] = None) -> BookProject:
+    def parse_file(file_path: str, project_id: Optional[str] = None,
+                   document_type: Optional[str] = None) -> BookProject:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
         ext = os.path.splitext(file_path)[1].lower()
         pid = project_id or str(uuid.uuid4())[:8]
 
+        mode = document_type or ("paper" if ext == ".pdf" else "novel")
+        formats = {"paper": (".pdf",), "novel": (".epub", ".docx", ".txt", ".md")}
+        if mode not in formats or ext not in formats[mode]:
+            raise ValueError("Paper chỉ nhận PDF; Novel nhận EPUB, DOCX, TXT hoặc Markdown.")
+
         if ext == ".epub":
-            return BookParser.parse_epub(file_path, pid)
+            project = BookParser.parse_epub(file_path, pid)
         elif ext == ".pdf":
-            return BookParser.parse_pdf(file_path, pid)
+            project = BookParser.parse_pdf(file_path, pid)
         elif ext == ".docx":
-            return BookParser.parse_docx(file_path, pid)
-        elif ext in (".txt", ".md"):
-            return BookParser.parse_text(file_path, pid)
+            project = BookParser.parse_docx(file_path, pid)
         else:
-            raise ValueError(f"Định dạng file không được hỗ trợ: {ext}. Hãy tải lên file EPUB, PDF, DOCX, TXT.")
+            project = BookParser.parse_text(file_path, pid)
+        project.document_type = mode
+        if not any(p.original_text.strip() and p.tag != "img"
+                   for chapter in project.chapters for p in chapter.paragraphs):
+            raise ValueError("Không tìm thấy văn bản để dịch. PDF scan cần OCR trước khi nhập vào Paper.")
+        if len(project.chapters) == 1:
+            project.structure_warnings.append(
+                "Chỉ nhận diện được một mục/chương. Hãy kiểm tra cấu trúc trước khi dịch; không chia tùy tiện theo độ dài."
+            )
+        return project
 
     @staticmethod
     def parse_epub(file_path: str, project_id: str) -> BookProject:
-        book = epub.read_epub(file_path)
-
-        # Extract title & author
-        title_meta = book.get_metadata('DC', 'title')
-        title = title_meta[0][0] if title_meta else os.path.splitext(os.path.basename(file_path))[0]
-        creator_meta = book.get_metadata('DC', 'creator')
-        author = creator_meta[0][0] if creator_meta else "Tác giả không rõ"
-
-        # 1. Build Table of Contents (TOC) Map: {doc_name: chapter_title}
-        toc_map: Dict[str, str] = {}
-
-        def extract_toc(toc_list):
-            for item in toc_list:
-                if isinstance(item, tuple):
-                    if hasattr(item[0], 'href') and hasattr(item[0], 'title'):
-                        href = item[0].href.split('#')[0]
-                        toc_map[href] = item[0].title.strip()
-                    if len(item) > 1 and isinstance(item[1], (list, tuple)):
-                        extract_toc(item[1])
-                elif hasattr(item, 'href') and hasattr(item, 'title'):
-                    href = item.href.split('#')[0]
-                    toc_map[href] = item.title.strip()
-
-        if hasattr(book, 'toc') and book.toc:
-            extract_toc(book.toc)
-
-        # Look for cover image
-        cover_path = ""
-        cache_dir = os.path.join(os.path.dirname(file_path), ".covers")
-        os.makedirs(cache_dir, exist_ok=True)
-        for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
-            name_lower = item.get_name().lower()
-            if "cover" in name_lower or "front" in name_lower:
-                cover_dest = os.path.join(cache_dir, f"{project_id}_cover.jpg")
-                with open(cover_dest, "wb") as cf:
-                    cf.write(item.get_content())
-                cover_path = cover_dest
-                break
-
-        chapters: List[BookChapter] = []
-        doc_items = list(book.get_items_of_type(ebooklib.ITEM_DOCUMENT))
-
-        chap_idx = 0
-        p_global_idx = 0
-
-        for doc in doc_items:
-            doc_name = doc.get_name()
-            content_bytes = doc.get_content()
-            try:
-                html_str = content_bytes.decode('utf-8')
-            except UnicodeDecodeError:
-                html_str = content_bytes.decode('latin-1', errors='ignore')
-
-            soup = BeautifulSoup(html_str, 'html.parser')
-
-            # Extract paragraphs and headings, including <div> blocks used in Calibre books
-            raw_elements = soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'li', 'div'])
-            filtered_elements = []
-            for el in raw_elements:
-                # If it's a div, skip container divs that contain child paragraphs or child divs
-                if el.name == 'div' and el.find(['p', 'div', 'blockquote']):
-                    continue
-                filtered_elements.append(el)
-
-            chapter_paras: List[BookParagraph] = []
-            in_doc_title = ""
-
-            for t in filtered_elements:
-                text = t.get_text(strip=True)
-                # Clean stray replacement / diamond characters
-                text = text.replace('\ufffd', '').strip()
-
-                # Ignore empty elements, trivial single characters or pure ornament dots
-                if not text or len(text) < 2 or text in ('* * *', '***', '• • •', '---'):
-                    continue
-
-                if t.name in ['h1', 'h2', 'h3'] and not in_doc_title:
-                    in_doc_title = text
-
-                p_global_idx += 1
-                css_cls = " ".join(t.get('class', [])) if t.has_attr('class') else ""
-                tag_name = t.name if t.name in ['h1', 'h2', 'h3', 'blockquote'] else 'p'
-                chapter_paras.append(BookParagraph(
-                    id=f"c{chap_idx}_p{p_global_idx}",
-                    original_text=text,
-                    tag=tag_name,
-                    index=p_global_idx,
-                    css_class=css_cls
-                ))
-
-            # Only add as a chapter if there is text
-            if chapter_paras:
-                # Determine best chapter title:
-                # Priority 1: From authoritative EPUB Table of Contents (TOC)
-                matched_toc = toc_map.get(doc_name) or toc_map.get(os.path.basename(doc_name))
-                if matched_toc:
-                    chap_title = matched_toc
-                elif in_doc_title:
-                    chap_title = in_doc_title
-                else:
-                    # Look at first paragraph: if it starts with "Chapter", "Prologue", etc.
-                    first_text = chapter_paras[0].original_text
-                    if re.match(r'^(?:chapter|part|prologue|epilogue|chương|hồi)\b', first_text, re.IGNORECASE) and len(first_text) < 100:
-                        chap_title = first_text
-                    elif len(first_text) <= 50:
-                        chap_title = first_text
-                    else:
-                        chap_title = f"Phần {chap_idx + 1}: " + (first_text[:50] + "...")
-
-                chapters.append(BookChapter(
-                    id=f"chap_{chap_idx}",
-                    title=chap_title,
-                    paragraphs=chapter_paras,
-                    doc_name=doc_name,
-                    order=chap_idx,
-                    raw_html=html_str
-                ))
-                chap_idx += 1
-
-        return BookProject(
-            id=project_id,
-            title=title,
-            author=author,
-            source_format="epub",
-            source_file_path=file_path,
-            cover_image_path=cover_path,
-            chapters=chapters
-        )
+        from core.epub_structure import parse_epub_structure
+        return parse_epub_structure(file_path, project_id)
 
 
     @staticmethod
@@ -293,7 +184,7 @@ class BookParser:
                     # Skip margin stamps / watermarks
                     if bbox[0] < 35 and bbox[1] > ph * 0.25:
                         continue
-                    if bbox[1] < 30 or bbox[3] > ph - 30:
+                    if bbox[3] < 20 or bbox[3] > ph - 30:
                         continue
                     if "arxiv:" in txt.lower():
                         continue
@@ -323,7 +214,7 @@ class BookParser:
                 extracted_title = " ".join(s["text"] for s in title_spans).strip()
                 extracted_title = re.sub(r'(\w+)-\s+(\w+)', r'\1\2', extracted_title)
                 extracted_title = re.sub(r'\s+', ' ', extracted_title).strip()
-                if len(extracted_title) >= 4:
+                if len(extracted_title) >= 4 and not title:
                     title = extracted_title
 
         # 2. EXTRACT AUTHORS
@@ -422,26 +313,22 @@ class BookParser:
 
     @staticmethod
     def _parse_pdf_mupdf(file_path: str, project_id: str) -> BookProject:
+        from core.paper_structure import PaperStructure
         doc = pymupdf.open(file_path)
+        structure = PaperStructure(doc)
         title, author = BookParser._extract_pdf_title_and_author(doc, file_path)
+
+        def is_title_line(text, page_number, bbox):
+            if page_number != 0 or bbox[1] > doc[0].rect.height * 0.35:
+                return False
+            value = re.sub(r'\s+', ' ', text).strip().casefold()
+            paper_title = re.sub(r'\s+', ' ', title).strip().casefold()
+            return value == paper_title or (len(value) >= 12 and value in paper_title)
 
         data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
         img_dir = os.path.join(data_dir, "projects", project_id, "images")
         os.makedirs(img_dir, exist_ok=True)
 
-        MAJOR_HEADING_PATTERN = re.compile(
-            r'^(?:'
-            r'(\d{1,2}\.?\s+[A-Z][\w\s\-/,\(\)]{2,})'
-            r'|'
-            r'(Abstract|Conclusion|Conclusions|References|Bibliography|Acknowledgements|Appendix(?:\s+[A-Z0-9]+)?)'
-            r'|'
-            r'((?:Chapter|Chương|Part|Phần|Section|Hồi|Mục)\s+([0-9ivxlc]+|[a-z]+)[:\s\.\-]*(.*))'
-            r')$',
-            re.IGNORECASE
-        )
-        SUB_HEADING_PATTERN = re.compile(
-            r'^(?:\d+\.)+\d+\s+([A-Z][\w\s\-/,\(\)]{2,})$'
-        )
         FIG_CAPTION_PATTERN = re.compile(
             r'^(?:Figure|Fig\.?|Hình)\s*([\d\.\-]+)\s*[:\.\-–]\s*(.*)',
             re.IGNORECASE
@@ -504,24 +391,9 @@ class BookParser:
                 current_paras = []
             current_title = next_title
 
-        HEADING_NUM_RE = re.compile(r'^(\d{1,2}(?:\.\d{1,2})*)$')
-        MAJOR_SINGLE_RE = re.compile(
-            r'^(?:'
-            r'(?:\d{1,2}\.?\s+[A-Z][\w\s\-/,\(\)]{2,})'
-            r'|'
-            r'(?:Abstract|Conclusion|Conclusions|References|Bibliography|Acknowledgements|Appendix(?:\s+[A-Z0-9]+)?|Attention Visualizations|Visualizations)'
-            r'|'
-            r'(?:(?:Chapter|Chương|Part|Phần|Section|Hồi|Mục)\s+([0-9ivxlc]+|[a-z]+)[:\s\.\-]*(.*))'
-            r')$',
-            re.IGNORECASE
-        )
-        SUB_SINGLE_RE = re.compile(
-            r'^(?:\d+\.)+\d+\s+([A-Z][\w\s\-/,\(\)]{2,})$'
-        )
-
         for page_num, page in enumerate(doc):
             drawings = page.get_drawings()
-            blocks = page.get_text("blocks")
+            blocks = PaperStructure.ordered_text_blocks(page)
 
             # 1. Detect and render Tables ONLY if page contains a Table caption
             page_tab_captions = []
@@ -660,7 +532,7 @@ class BookParser:
                             if b[6] != 0:
                                 continue
                             b_first = b[4].strip().splitlines()[0].strip() if b[4].strip() else ""
-                            if MAJOR_SINGLE_RE.match(b_first):
+                            if structure.classify(b_first, page_num, b[:4]) == 1:
                                 h_rect = pymupdf.Rect(b[:4])
                                 if h_rect.y1 <= y0 + 15:
                                     y0 = max(y0, h_rect.y1 + 4)
@@ -680,8 +552,8 @@ class BookParser:
                 # Skip vertical margin watermarks (e.g. arXiv timestamp on left margin)
                 if b[0] < 45 and (b[3] - b[1] > 120 or 'arxiv:' in b[4].lower()):
                     continue
-                # Skip running headers at the top of pages > 0
-                if page_num > 0 and b[1] < 72 and (b[3] - b[1] < 20):
+                # Only remove repeated margin text, not real headings near the top.
+                if structure.is_running_header(b[4].strip(), page_num, b[:4]):
                     continue
                 # Skip page numbers at bottom
                 if b[1] > page.rect.height - 60 and re.match(r'^\s*\d{1,3}\s*$', b[4]):
@@ -708,9 +580,14 @@ class BookParser:
                 if not lines:
                     continue
 
-                # Check for major heading BEFORE figure exclusion to never lose top section titles
-                if MAJOR_SINGLE_RE.match(lines[0]) and len(lines[0]) < 75 and not lines[0].endswith(('.', ':', ';')):
+                # Capture major headings before figure clipping, retaining source text.
+                level = structure.classify(lines[0], page_num, b[:4])
+                if is_title_line(lines[0], page_num, b[:4]):
+                    level = 0
+                if level == 1:
                     flush_chapter(lines[0])
+                    current_lines.append(lines[0])
+                    flush_para(tag="h2")
                     lines = lines[1:]
                     if not lines:
                         continue
@@ -724,36 +601,33 @@ class BookParser:
                 if in_fig:
                     continue
 
-                # Check for Heading at the start of the block
-                m_num = HEADING_NUM_RE.match(lines[0])
-                if m_num and len(lines) >= 2 and lines[1][0].isupper() and len(lines[1]) < 65:
-                    num_str = m_num.group(1)
-                    heading = f"{num_str} {lines[1]}"
-                    if '.' not in num_str:
-                        flush_chapter(heading)
-                    else:
-                        flush_para()
+                # Some PDFs put the section number on its own line.
+                if re.fullmatch(r'\d{1,2}(?:\.\d{1,2})*', lines[0]) and len(lines) >= 2:
+                    heading = f"{lines[0]} {lines[1]}"
+                    level = structure.classify(heading, page_num, b[:4])
+                    if level:
+                        if level == 1:
+                            flush_chapter(heading)
+                        else:
+                            flush_para()
                         current_lines.append(heading)
-                        flush_para(tag="h3")
-                    lines = lines[2:]
-                    if not lines:
-                        continue
-                elif SUB_SINGLE_RE.match(lines[0]) and len(lines[0]) < 75 and not lines[0].endswith(('.', ':', ';')):
-                    flush_para()
-                    current_lines.append(lines[0])
-                    flush_para(tag="h3")
-                    lines = lines[1:]
-                    if not lines:
-                        continue
-                elif re.match(r'^(?:Encoder|Decoder)[:\.]?$', lines[0]):
-                    flush_para()
-                    current_lines.append(lines[0])
-                    flush_para(tag="h4")
-                    lines = lines[1:]
-                    if not lines:
-                        continue
+                        flush_para(tag=f"h{min(level + 1, 6)}")
+                        lines = lines[2:]
+                if not lines:
+                    continue
 
                 for l_idx, line in enumerate(lines):
+                    level = structure.classify(line, page_num, b[:4])
+                    if is_title_line(line, page_num, b[:4]):
+                        level = 0
+                    if level:
+                        if level == 1:
+                            flush_chapter(line)
+                        else:
+                            flush_para()
+                        current_lines.append(line)
+                        flush_para(tag=f"h{min(level + 1, 6)}")
+                        continue
                     m_tab = TAB_CAPTION_PATTERN.match(line)
                     if m_tab:
                         flush_para()
@@ -808,6 +682,7 @@ class BookParser:
                         flush_para()
 
         flush_chapter("End")
+        doc.close()
 
         return BookProject(
             id=project_id,
@@ -815,7 +690,8 @@ class BookParser:
             author=author,
             source_format="pdf",
             source_file_path=file_path,
-            chapters=chapters
+            chapters=chapters,
+            document_type="paper"
         )
 
     @staticmethod
@@ -827,20 +703,7 @@ class BookParser:
         title = meta.title if (meta and meta.title and meta.title.strip()) else clean_name
         author = meta.author if (meta and meta.author and meta.author.strip()) else "Tác giả không rõ"
 
-        MAJOR_HEADING_PATTERN = re.compile(
-            r'^(?:'
-            r'(\d{1,2}\.?\s+[A-Z][\w\s\-/,\(\)]{2,})'
-            r'|'
-            r'(Abstract|Conclusion|Conclusions|References|Bibliography|Acknowledgements|Appendix(?:\s+[A-Z0-9]+)?)'
-            r'|'
-            r'((?:Chapter|Chương|Part|Phần|Section|Hồi|Mục)\s+([0-9ivxlc]+|[a-z]+)[:\s\.\-]*(.*))'
-            r')$',
-            re.IGNORECASE
-        )
-
-        SUB_HEADING_PATTERN = re.compile(
-            r'^(?:\d+\.)+\d+\s+([A-Z][\w\s\-/,\(\)]{2,})$'
-        )
+        from core.paper_structure import classify_plain_heading
 
         chapters: List[BookChapter] = []
         p_global_idx = 0
@@ -930,16 +793,14 @@ class BookParser:
             avg_line_len = (sum(long_lines) / len(long_lines)) if long_lines else 80
 
             for l_idx, line in enumerate(raw_lines):
-                m_major = MAJOR_HEADING_PATTERN.match(line)
-                if m_major and len(line) < 75 and not line.endswith(('.', ',', ';')):
-                    flush_chapter(line)
-                    continue
-
-                m_sub = SUB_HEADING_PATTERN.match(line)
-                if m_sub and len(line) < 75 and not line.endswith(('.', ',', ';')):
-                    flush_para()
+                level = classify_plain_heading(line)
+                if level:
+                    if level == 1:
+                        flush_chapter(line)
+                    else:
+                        flush_para()
                     current_lines.append(line)
-                    flush_para(tag="h3")
+                    flush_para(tag=f"h{min(level + 1, 6)}")
                     continue
 
                 is_bullet = line.startswith(('•', '–', '- ', '* '))
@@ -973,9 +834,8 @@ class BookParser:
                 next_starts_new_block = False
                 if l_idx + 1 < len(raw_lines):
                     next_l = raw_lines[l_idx + 1]
-                    if (MAJOR_HEADING_PATTERN.match(next_l) or 
-                        SUB_HEADING_PATTERN.match(next_l) or 
-                        next_l.startswith(('•', '–', '- ', '* ')) or 
+                    if (classify_plain_heading(next_l) or
+                        next_l.startswith(('•', '–', '- ', '* ')) or
                         re.match(r'^(?:Figure|Fig\.?|Table)\s*[\d\.\-]+[:\.]?', next_l, re.I) or
                         re.match(r'^\[\d+\]\s+[A-Z]', next_l)):
                         next_starts_new_block = True
@@ -1006,7 +866,9 @@ class BookParser:
             author=author,
             source_format="pdf",
             source_file_path=file_path,
-            chapters=chapters
+            chapters=chapters,
+            document_type="paper",
+            structure_warnings=["Đang dùng bộ đọc PDF dự phòng: không có thông tin font/bố cục để kiểm chứng mọi tiêu đề."]
         )
 
     @staticmethod
@@ -1021,14 +883,28 @@ class BookParser:
         chap_idx = 0
         p_global_idx = 0
 
+        heading_levels = [int(match.group(1)) for p in doc.paragraphs
+                          if p.text.strip() and p.style
+                          and (match := re.fullmatch(r'heading ([1-6])', p.style.name.lower()))]
+        chapter_level = min(heading_levels) if heading_levels else None
+
         for p in doc.paragraphs:
             text = p.text.strip()
             if not text:
                 continue
 
             style_name = p.style.name.lower() if p.style else ""
-            is_heading = "heading 1" in style_name or "title" in style_name or re.match(r'^(?:chapter|chương)\s+\d+', text, re.I)
+            heading = re.fullmatch(r'heading ([1-6])', style_name)
+            level = int(heading.group(1)) if heading else None
+            is_heading = (level == chapter_level if level else False) or style_name == 'title'
+            if chapter_level is None and len(text) < 100:
+                is_heading = is_heading or bool(re.fullmatch(
+                    r'(?:(?:chapter|chương|part|phần|hồi)\s+(?:\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten)(?:\s*[:.–—-]\s*.+)?|prologue|epilogue|interlude|lời mở đầu|lời kết)',
+                    text, re.I))
 
+            if is_heading:
+                if not current_paras:
+                    current_title = text
             if is_heading and current_paras:
                 chapters.append(BookChapter(
                     id=f"chap_{chap_idx}",
@@ -1041,7 +917,7 @@ class BookParser:
                 current_title = text
 
             p_global_idx += 1
-            tag = "h1" if is_heading else ("h2" if "heading" in style_name else "p")
+            tag = f'h{level}' if level else ('h1' if is_heading else 'p')
             current_paras.append(BookParagraph(
                 id=f"c{chap_idx}_p{p_global_idx}",
                 original_text=text,
@@ -1075,9 +951,12 @@ class BookParser:
         author = "Tác giả không rõ"
 
         chapter_header_pattern = re.compile(
-            r'^(?:#+\s*|CHAPTER\s+|CHƯƠNG\s+|Part\s+)([0-9ivxlc]+|[a-z]+)[:\s\.\-]*(.*)$',
-            re.IGNORECASE | re.MULTILINE
+            r'^(?:(?:chapter|chương|part|phần|hồi)\s+(?:[0-9ivxlcdm]+|[a-z]+)(?:[\s:.–—-].*)?|(?:prologue|epilogue|interlude|lời mở đầu|lời kết)(?:[\s:.–—-].*)?)$',
+            re.IGNORECASE
         )
+        markdown_levels = [len(m.group(1)) for m in re.finditer(r'^(#{1,6})\s+\S', full_text, re.MULTILINE)]
+        chapter_level = min(markdown_levels) if markdown_levels else None
+
 
         lines = full_text.splitlines()
         chapters: List[BookChapter] = []
@@ -1109,8 +988,10 @@ class BookParser:
                 flush_buffer()
                 continue
 
-            match = chapter_header_pattern.match(line_str)
-            if match and len(line_str) < 100:
+            markdown = re.match(r'^(#{1,6})\s+(.+)$', line_str)
+            match = chapter_header_pattern.fullmatch(line_str)
+            is_chapter = bool(match or (markdown and len(markdown.group(1)) == chapter_level))
+            if is_chapter and len(line_str) < 100:
                 flush_buffer()
                 if current_paras:
                     chapters.append(BookChapter(
@@ -1129,6 +1010,10 @@ class BookParser:
                     tag="h1",
                     index=p_global_idx
                 ))
+            elif markdown:
+                flush_buffer()
+                buf.append(markdown.group(2))
+                flush_buffer(target_tag=f'h{len(markdown.group(1))}')
             else:
                 buf.append(line_str)
 

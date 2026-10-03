@@ -22,7 +22,9 @@
 
 ## 1. Tính năng và định dạng
 
-- Tách tài liệu thành chương và đoạn; lưu tiến độ trong thư mục dữ liệu cục bộ.
+- Hai luồng nhập riêng: **Paper PDF** (xanh teal) và **Novel ebook** (tím nhẹ), dùng chung workspace dịch và lưu tiến độ.
+- Paper nhận diện mục lớn theo outline, font và bố cục; tiểu mục ở trong mục cha. Novel ưu tiên spine/mục lục/anchor EPUB, sau đó phân cấp heading.
+- Cảnh báo cấu trúc được hiển thị cạnh mục lục; không tự chia chương theo độ dài hay chia lại dự án đã lưu.
 - Dịch một chương hoặc các phần còn thiếu của sách; có lệnh dịch lại từ đầu.
 - Cấu hình nhà cung cấp, model, API key và endpoint tương thích.
 - Quản lý nhân vật, đại từ xưng hô, thuật ngữ và yêu cầu bổ sung.
@@ -32,12 +34,14 @@
 
 ### Đầu vào
 
-| Định dạng | Ghi chú |
-| --- | --- |
-| EPUB | Phù hợp với sách điện tử có văn bản và cấu trúc chương. |
-| PDF | Ưu tiên PDF có lớp văn bản; thứ tự đọc và bố cục phức tạp cần kiểm tra. |
-| DOCX | Tệp Word hiện đại; không hỗ trợ định dạng DOC cũ. |
-| TXT, MD | Văn bản thuần; nên dùng UTF-8. Markdown không được bảo đảm giữ mọi cú pháp. |
+| Luồng | Định dạng | Ghi chú |
+| --- | --- | --- |
+| Paper PDF | PDF | Cần lớp văn bản; mục lớn, tiểu mục, thứ tự hai cột cần kiểm tra sau nhập. PDF scan cần OCR trước. |
+| Novel ebook | EPUB | Ưu tiên thứ tự đọc và mục lục, kể cả nhiều chương trong một XHTML hoặc một chương trải trên nhiều XHTML. |
+| Novel ebook | DOCX | Dùng cấp heading mạnh nhất làm chương, giữ heading nhỏ trong chương; không hỗ trợ DOC cũ. |
+| Novel ebook | TXT, MD | Nên dùng UTF-8 và tiêu đề chương rõ ràng. Markdown dùng cấp heading mạnh nhất; không giữ mọi cú pháp. |
+
+**PDF → EPUB** dành cho giáo trình là chức năng riêng, không phải luồng Paper hay Novel.
 
 Giới hạn mỗi lần upload: **100 MiB**. File rỗng bị từ chối. File và dự án tạo dở được dọn nếu quá trình upload/phân tích thất bại.
 
@@ -113,10 +117,10 @@ Giữ terminal mở khi dùng ứng dụng. Để tắt an toàn, tạm dừng d
 
 1. Khởi động ứng dụng và mở **Cài đặt API**.
 2. Chọn nhà cung cấp, model và nhập key/endpoint nếu cần; bấm lưu cấu hình.
-3. Chọn **Tải sách lên**, chọn file hợp lệ và chờ phân tích.
-4. Chọn dự án và một chương trong danh sách bên trái; kiểm tra văn bản gốc có đúng thứ tự hay không.
-5. Mở **Nhân vật & Văn phong**, chọn văn phong và bổ sung thuật ngữ quan trọng; lưu lại.
-6. Bấm **Dịch chương này** để thử một chương ngắn.
+3. Chọn **Paper PDF** hoặc **Novel ebook**, chọn đúng loại file và chờ phân tích. Có thể đổi loại trong hộp tải tài liệu.
+4. Chọn dự án và một mục/chương bên trái; đọc cảnh báo cấu trúc và kiểm tra bản gốc đúng thứ tự, không mất đoạn.
+5. Mở **Văn phong & thuật ngữ**. Paper khóa giọng học thuật và ẩn nhân vật; Novel cho chọn giọng văn, xưng hô. Cả hai giữ thuật ngữ và chỉ dẫn riêng; bấm lưu.
+6. Bấm **Dịch mục** hoặc **Dịch chương** để thử một phần ngắn.
 7. Theo dõi log, đọc và sửa một số đoạn. Nếu cấu hình hoặc cách xưng hô chưa phù hợp, điều chỉnh trước khi dịch toàn bộ.
 8. Dịch các phần còn lại, rà soát những đoạn chưa dịch rồi xuất sách.
 
@@ -180,7 +184,7 @@ Nút **Kiểm tra Quota & Sức khỏe Key** thực hiện yêu cầu thử; nó
 
 Trong **Nhân vật & Văn phong**:
 
-- Chọn tiểu thuyết, kỳ ảo, self-help, học thuật hoặc cổ điển theo loại tài liệu.
+- Novel cho chọn tiểu thuyết, kỳ ảo, self-help hoặc cổ điển. Paper luôn dùng giọng học thuật, kể cả khi dữ liệu cũ lưu giọng khác; worker không ghi đè glossary đã lưu chỉ để áp dụng giọng phù hợp.
 - Với nhân vật, nhập tên, vai trò, giới tính nếu biết, đại từ ngôi thứ nhất/thứ hai/thứ ba và ghi chú quan hệ.
 - Với thuật ngữ, nhập cách viết gốc, bản dịch mong muốn và ghi chú ngữ cảnh.
 - Thêm hướng dẫn riêng, ví dụ: “Giữ nguyên tên riêng; dùng tôi–cậu giữa hai nhân vật chính; không diễn giải thêm nội dung ngoài bản gốc.”
@@ -327,7 +331,8 @@ web/                         HTML, CSS, JavaScript
 
 ~~~powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m unittest test_server_endpoints -v
+.\.venv\Scripts\python.exe -m unittest discover -v
+node test_web_workflows.js
 ~~~
 
 Trên macOS/Linux, thay đường dẫn Python bằng .venv/bin/python.
@@ -346,4 +351,6 @@ Lệnh node ở trên chỉ dành cho kiểm tra JavaScript nếu có Node.js, k
 
 ### Kết quả kiểm chứng trong lần nâng cấp
 
-10 test hồi quy offline đã đạt trên Windows; Python và JavaScript đã qua kiểm tra cú pháp. Có cảnh báo deprecated từ TestClient/thư viện HTTP trong môi trường kiểm thử. Kết quả này không chứng nhận kết nối thật tới từng provider, giá/quota/model hiện hành hoặc độ trung thực của mọi định dạng xuất sách.
+Bộ hồi quy bao gồm API, lưu/đọc metadata cũ và mới, Paper/PDF, Novel/EPUB/DOCX/Markdown và xuất heading không lặp. Test giao diện chạy bằng Chrome/Edge headless với API giả lập, không cần npm package hay key thật; cần Node.js có WebSocket tích hợp (22+) và trình duyệt Chromium đã cài, hoặc đặt TEST_BROWSER tới executable.
+
+Có cảnh báo deprecated từ TestClient/thư viện HTTP trong môi trường kiểm thử. Kết quả không chứng nhận kết nối thật tới từng provider, giá/quota/model hiện hành, chất lượng dịch hoặc độ trung thực của mọi tài liệu nguồn.

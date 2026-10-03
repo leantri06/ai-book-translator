@@ -6,7 +6,7 @@
     <meta name="color-scheme" content="dark">
     <title>AI Book Translator — Không gian biên dịch</title>
     <meta name="description" content="Không gian dịch sách Anh – Việt, đối chiếu bản dịch, quản lý thuật ngữ và xuất tài liệu.">
-    <link rel="stylesheet" href="/static/app.css?v=4.0.0">
+    <link rel="stylesheet" href="/static/app.css?v=4.1.0">
 </head>
 <body class="dark-theme">
     <div id="app" class="app-layout">
@@ -28,6 +28,8 @@
                     <label for="projectSelect" class="project-label">Dự án</label>
                     <select id="projectSelect" class="styled-select" title="Chọn sách"><option value="">Đang tải danh sách…</option></select>
                     <div class="project-actions">
+                        <button id="btnUploadPaper" class="btn btn-outline btn-sm" type="button" title="Tải bài báo khoa học PDF">Paper PDF</button>
+                        <button id="btnUploadNovel" class="btn btn-outline btn-sm" type="button" title="Tải tiểu thuyết hoặc sách điện tử">Novel ebook</button>
                         <button id="btnNewBook" class="btn btn-outline btn-sm">Tải sách mới</button>
                         <button id="btnTextbookModal" class="btn btn-outline btn-sm" title="Chuyển giáo trình PDF sang EPUB">PDF → EPUB</button>
                         <button id="btnDeleteProject" class="btn btn-text btn-sm" title="Xóa dự án đang chọn">Xóa dự án</button>
@@ -44,6 +46,7 @@
             <aside class="sidebar-left" id="sidebarChapters" aria-label="Mục lục">
                 <div class="sidebar-header"><h2 class="sidebar-title">Mục lục</h2><div class="sidebar-header-actions"><span class="badge-count" id="chapterCountBadge">0</span><button id="btnCloseChapters" class="btn-close-panel mobile-only" aria-label="Đóng mục lục">×</button></div></div>
                 <div class="search-box"><label for="chapterSearchInput" class="sr-only">Tìm chương</label><input type="search" id="chapterSearchInput" placeholder="Tìm chương…" class="styled-input input-sm full-width"></div>
+                <div id="structureWarningsPanel" class="structure-warnings-panel hidden" aria-label="Cảnh báo cấu trúc tài liệu"><div class="structure-warnings-header"><span class="structure-warnings-title">Lưu ý cấu trúc</span></div><ul id="structureWarningsList" class="structure-warnings-list"></ul></div>
                 <nav class="chapters-list" id="chaptersList" aria-label="Danh sách chương"><div class="empty-placeholder"><p>Chưa có sách được chọn.<br>Tải sách lên để bắt đầu.</p></div></nav>
             </aside>
             <section class="content-center" aria-label="Không gian biên dịch">
@@ -74,7 +77,7 @@
                 <div class="sidebar-header"><h2 class="sidebar-title">Thiết lập bản dịch</h2><button class="btn-close-panel" id="btnCloseRightSidebar" aria-label="Đóng thiết lập bản dịch">×</button></div>
                 <div class="sidebar-right-content">
                     <div class="setting-group"><label class="group-label" for="toneSelect">Giọng văn</label><select id="toneSelect" class="styled-select full-width"><option value="novel">Tiểu thuyết / Văn học</option><option value="fantasy">Kỳ ảo / Light Novel</option><option value="selfhelp">Kỹ năng / Self-Help</option><option value="academic">Học thuật / Khoa học</option><option value="classic">Văn học cổ điển</option></select></div>
-                    <div class="setting-group"><div class="group-header-with-action"><span class="group-label">Nhân vật & xưng hô</span><button id="btnAutoDetectChars" class="btn btn-outline btn-xs" title="Dùng AI phân tích nhân vật">Phân tích AI</button></div><p class="helper-text">Định nghĩa đại từ để giữ cách xưng hô nhất quán giữa các chương.</p><div class="character-list" id="characterList"></div><button id="btnAddCharacter" class="btn btn-outline btn-sm full-width">Thêm nhân vật</button></div>
+                    <div class="setting-group" id="groupCharacterSettings"><div class="group-header-with-action"><span class="group-label">Nhân vật & xưng hô</span><button id="btnAutoDetectChars" class="btn btn-outline btn-xs" title="Dùng AI phân tích nhân vật">Phân tích AI</button></div><p class="helper-text">Định nghĩa đại từ để giữ cách xưng hô nhất quán giữa các chương.</p><div class="character-list" id="characterList"></div><button id="btnAddCharacter" class="btn btn-outline btn-sm full-width">Thêm nhân vật</button></div>
                     <div class="setting-group"><span class="group-label">Thuật ngữ & tên riêng</span><div class="terms-list" id="termsList"></div><button id="btnAddTerm" class="btn btn-outline btn-sm full-width">Thêm thuật ngữ</button></div>
                     <div class="setting-group"><label class="group-label" for="customInstructions">Chỉ dẫn riêng</label><textarea id="customInstructions" class="styled-textarea" rows="4" placeholder="Ví dụ: Giữ nguyên từ Recon; xưng hô giữa hai nhân vật là tôi – cậu."></textarea></div>
                     <button id="btnSaveGlossary" class="btn btn-primary full-width">Lưu thiết lập</button>
@@ -86,8 +89,24 @@
 
         <div class="modal-backdrop hidden" id="uploadModal">
             <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="uploadModalTitle" tabindex="-1">
-                <div class="modal-header"><h2 id="uploadModalTitle">Tải sách mới</h2><button class="btn-close-modal" id="btnCloseUploadModal" aria-label="Đóng tải sách">×</button></div>
-                <div class="modal-body"><div class="dropzone" id="bookDropzone"><span class="eyebrow">NHẬP TÀI LIỆU</span><h3>Kéo thả file sách vào đây</h3><p>EPUB, PDF, DOCX, TXT hoặc MD · Tối đa 100 MiB</p><input type="file" id="bookFileInput" accept=".epub,.pdf,.docx,.txt,.md" class="hidden"><button class="btn btn-primary mt-2" onclick="document.getElementById('bookFileInput').click()">Chọn file từ máy tính</button></div><div id="uploadProgressContainer" class="hidden notice" role="status"><div class="progress-labels"><span id="uploadStatusText">Đang phân tích sách…</span></div><div class="progress-track"><div class="progress-fill indeterminate"></div></div></div></div>
+                <div class="modal-header"><h2 id="uploadModalTitle">Tải tài liệu mới</h2><button class="btn-close-modal" id="btnCloseUploadModal" aria-label="Đóng tải sách">×</button></div>
+                <div class="modal-body">
+                    <div class="upload-mode-selector" id="uploadModeSelector" role="group" aria-label="Loại tài liệu">
+                        <button type="button" class="btn btn-outline btn-sm upload-mode-btn active" id="btnUploadModePaper" data-mode="paper" aria-pressed="true">Paper PDF</button>
+                        <button type="button" class="btn btn-outline btn-sm upload-mode-btn" id="btnUploadModeNovel" data-mode="novel" aria-pressed="false">Novel ebook</button>
+                    </div>
+                    <div class="dropzone" id="bookDropzone">
+                        <span class="eyebrow" id="uploadDropzoneEyebrow">NHẬP TÀI LIỆU</span>
+                        <h3 id="uploadDropzoneHeading">Kéo thả file PDF bài báo vào đây</h3>
+                        <p id="uploadAcceptHint">Chỉ chấp nhận file PDF · Tối đa 100 MiB</p>
+                        <input type="file" id="bookFileInput" accept=".pdf" class="hidden">
+                        <button type="button" class="btn btn-primary mt-2" id="btnBrowseFile">Chọn file từ máy tính</button>
+                    </div>
+                    <div id="uploadProgressContainer" class="hidden notice" role="status">
+                        <div class="progress-labels"><span id="uploadStatusText">Đang phân tích sách…</span></div>
+                        <div class="progress-track" id="uploadProgressTrack"><div class="progress-fill indeterminate"></div></div>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="modal-backdrop hidden" id="textbookModal">
@@ -141,6 +160,6 @@
             </div>
         </div>
     </div>
-    <script src="/static/app.js?v=4.0.0"></script>
+    <script src="/static/app.js?v=4.1.0"></script>
 </body>
 </html>

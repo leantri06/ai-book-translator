@@ -219,6 +219,18 @@ class TranslationWorker:
                 self.add_log(project_id, "error", f"Không tìm thấy dự án {project_id}")
                 return
 
+            # 4. Enforce effective glossary tone by project document_type
+            #    Use a working copy so user's stored glossary is never silently overwritten.
+            import copy
+            effective_glossary = copy.copy(glossary)
+            effective_glossary.characters = dict(glossary.characters)
+            effective_glossary.terms = dict(glossary.terms)
+
+            if project.document_type == "paper":
+                effective_glossary.tone = "academic"
+            elif project.document_type == "novel" and effective_glossary.tone == "academic":
+                effective_glossary.tone = "novel"
+
             # Determine chapters to translate
             chapters_to_process = []
             if target_chapter_id:
@@ -332,7 +344,7 @@ class TranslationWorker:
                         wait_s = 35.0
 
                         try:
-                            translated_map = translator.translate_chunk(chunk, glossary, api_key=worker_key)
+                            translated_map = translator.translate_chunk(chunk, effective_glossary, api_key=worker_key)
                         except DailyQuotaError as dqe:
                             hit_daily = True
                             logger.warning(f"Key #{worker_id} daily quota exhausted: {dqe}")

@@ -15,11 +15,17 @@ class BookTranslatorApp {
         this.fontSize = 18;
         this.readerFont = 'font-serif';
         this.readerDisplayMode = 'vi-only';
+        this.uploadType = 'paper';
+        this.isUploading = false;
+        this._projectSwitchToken = 0;
+        this._chapterSwitchToken = 0;
+        this._loadedCharacters = [];
         this._modalStack = [];      // focus-restore stack
         this._inertStates = new Map();
 
         this.initElements();
         this.bindEvents();
+        this.setUploadType(this.uploadType);
         this.init();
     }
 
@@ -35,6 +41,8 @@ class BookTranslatorApp {
         this.btnPauseTranslate = document.getElementById('btnPauseTranslate');
         this.btnExportModal = document.getElementById('btnExportModal');
         this.btnSettingsModal = document.getElementById('btnSettingsModal');
+        this.btnUploadPaper = document.getElementById('btnUploadPaper');
+        this.btnUploadNovel = document.getElementById('btnUploadNovel');
 
         // globalProgressBox ARIA
         const gpb = document.getElementById('globalProgressBox');
@@ -92,6 +100,7 @@ class BookTranslatorApp {
         this.btnAddTerm = document.getElementById('btnAddTerm');
         this.customInstructions = document.getElementById('customInstructions');
         this.btnSaveGlossary = document.getElementById('btnSaveGlossary');
+        this.groupCharacterSettings = document.getElementById('groupCharacterSettings');
 
         // sidebarRight initially collapsed
         if (this.sidebarRight) {
@@ -120,6 +129,14 @@ class BookTranslatorApp {
         this.bookFileInput = document.getElementById('bookFileInput');
         this.uploadProgressContainer = document.getElementById('uploadProgressContainer');
         this.uploadStatusText = document.getElementById('uploadStatusText');
+        this.btnUploadModePaper = document.getElementById('btnUploadModePaper');
+        this.btnUploadModeNovel = document.getElementById('btnUploadModeNovel');
+        this.uploadModalTitle = document.getElementById('uploadModalTitle');
+        this.uploadDropzoneHeading = document.getElementById('uploadDropzoneHeading');
+        this.uploadAcceptHint = document.getElementById('uploadAcceptHint');
+        this.uploadProgressTrack = document.getElementById('uploadProgressTrack');
+        this.structureWarningsPanel = document.getElementById('structureWarningsPanel');
+        this.structureWarningsList = document.getElementById('structureWarningsList');
 
         this.settingsModal = document.getElementById('settingsModal');
         this.btnCloseSettingsModal = document.getElementById('btnCloseSettingsModal');
@@ -203,9 +220,29 @@ class BookTranslatorApp {
     }
 
     bindEvents() {
-        // Project selection
+        // Project selection & explicit upload mode buttons
         this.projectSelect.addEventListener('change', (e) => this.selectProject(e.target.value));
-        this.btnNewBook.addEventListener('click', () => this.showModal(this.uploadModal));
+        if (this.btnUploadPaper) {
+            this.btnUploadPaper.addEventListener('click', () => this.openUploadModal('paper'));
+        }
+        if (this.btnUploadNovel) {
+            this.btnUploadNovel.addEventListener('click', () => this.openUploadModal('novel'));
+        }
+        this.btnNewBook.addEventListener('click', () => this.openUploadModal());
+        if (this.btnUploadModePaper) {
+            this.btnUploadModePaper.addEventListener('click', () => this.setUploadType('paper'));
+        }
+        if (this.btnUploadModeNovel) {
+            this.btnUploadModeNovel.addEventListener('click', () => this.setUploadType('novel'));
+        }
+        const btnBrowseFile = document.getElementById('btnBrowseFile');
+        if (btnBrowseFile) {
+            btnBrowseFile.addEventListener('click', () => {
+                if (!this.isUploading && this.bookFileInput) {
+                    this.bookFileInput.click();
+                }
+            });
+        }
         if (this.btnDeleteProject) {
             this.btnDeleteProject.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -427,6 +464,7 @@ class BookTranslatorApp {
         this.bookDropzone.addEventListener('drop', (e) => {
             e.preventDefault();
             this.bookDropzone.classList.remove('dragover');
+            if (this.isUploading) return;
             if (e.dataTransfer.files && e.dataTransfer.files[0]) {
                 this.handleFileUpload(e.dataTransfer.files[0]);
             }
@@ -472,16 +510,18 @@ class BookTranslatorApp {
 
     // --- SSE / STATUS POLLING ---
 
-    startStatusPolling(_projectId) {
+    startStatusPolling(projectId) {
         if (this.pollTimer) clearInterval(this.pollTimer);
         this.lastPollTimestamp = 0;
 
         const pollFunc = async () => {
-            if (!this.currentProjectId) return;
+            if (this.currentProjectId !== projectId) return;
+            const switchToken = this._projectSwitchToken;
             try {
-                const res = await fetch(`/api/projects/${this.currentProjectId}/status?since=${this.lastPollTimestamp}`);
+                const res = await fetch(`/api/projects/${projectId}/status?since=${this.lastPollTimestamp}`);
                 if (!res.ok) return;
                 const data = await res.json();
+                if (this.currentProjectId !== projectId || switchToken !== this._projectSwitchToken) return;
                 this.lastPollTimestamp = data.timestamp || (Date.now() / 1000);
 
                 // 1. Update running status
@@ -610,6 +650,8 @@ class BookTranslatorApp {
             this.currentProject = null;
             this.currentChapterId = null;
             this.currentChapter = null;
+            delete document.body.dataset.doctype;
+            this.renderStructureWarnings([]);
             this.projectTitleDisplay.textContent = 'Chưa chọn sách';
             this.updateGlobalProgress(0);
             this.chapterCountBadge.textContent = '0';
@@ -629,26 +671,170 @@ class BookTranslatorApp {
         }
     }
 
-    async loadProjects() {
+    openUploadModal(mode = null) {
+        if (this.isUploading) {
+            this.showModal(this.uploadModal);
+            return;
+        }
+        if (mode) {
+            this.setUploadType(mode);
+        } else {
+            this.setUploadType(this.uploadType || 'novel');
+        }
+        if (this.uploadProgressContainer) {
+            this.uploadProgressContainer.classList.add('hidden');
+        }
+        this.showModal(this.uploadModal);
+    }
+
+    setUploadType(mode) {
+        if (this.isUploading) return;
+        this.uploadType = mode === 'paper' ? 'paper' : 'novel';
+        this.uploadModal.dataset.uploadType = this.uploadType;
+        const isPaper = this.uploadType === 'paper';
+
+        if (this.btnUploadModePaper) {
+            this.btnUploadModePaper.classList.toggle('active', isPaper);
+            this.btnUploadModePaper.setAttribute('aria-pressed', isPaper ? 'true' : 'false');
+        }
+        if (this.btnUploadModeNovel) {
+            this.btnUploadModeNovel.classList.toggle('active', !isPaper);
+            this.btnUploadModeNovel.setAttribute('aria-pressed', !isPaper ? 'true' : 'false');
+        }
+        if (this.bookFileInput) {
+            this.bookFileInput.accept = isPaper ? '.pdf' : '.epub,.docx,.txt,.md';
+        }
+        if (this.uploadModalTitle) {
+            this.uploadModalTitle.textContent = isPaper ? 'Tải bài báo (Paper PDF)' : 'Tải sách điện tử (Novel eBook)';
+        }
+        if (this.uploadDropzoneHeading) {
+            this.uploadDropzoneHeading.textContent = isPaper
+                ? 'Kéo thả file PDF bài báo vào đây'
+                : 'Kéo thả file sách (EPUB, DOCX, TXT, MD) vào đây';
+        }
+        if (this.uploadAcceptHint) {
+            this.uploadAcceptHint.textContent = isPaper
+                ? 'Chỉ chấp nhận file PDF · Tối đa 100 MiB'
+                : 'EPUB, DOCX, TXT hoặc MD · Tối đa 100 MiB';
+        }
+    }
+
+    _setUploadControlsLocked(locked) {
+        if (this.btnUploadModePaper) this.btnUploadModePaper.disabled = locked;
+        if (this.btnUploadModeNovel) this.btnUploadModeNovel.disabled = locked;
+        if (this.bookFileInput) this.bookFileInput.disabled = locked;
+        const browseBtn = document.getElementById('btnBrowseFile');
+        if (browseBtn) browseBtn.disabled = locked;
+    }
+
+    normalizeDocType(proj) {
+        if (!proj) return 'novel';
+        const dt = (proj.document_type || '').toLowerCase().trim();
+        if (dt === 'paper' || dt === 'novel' || dt === 'textbook') return dt;
+        const name = (proj.original_filename || proj.filename || proj.title || '').toLowerCase();
+        if (proj.source_format === 'pdf' || proj.format === 'pdf' || name.endsWith('.pdf')) {
+            return 'paper';
+        }
+        return 'novel';
+    }
+
+    updateDocTypeUI(docType) {
+        const isPaper = docType === 'paper';
+        const isNovel = docType === 'novel';
+        const label = isPaper ? 'Mục' : 'Chương';
+        this.tabReader.textContent = isPaper ? 'Đọc paper' : 'Đọc sách';
+        this.btnExportModal.textContent = isPaper ? 'Xuất paper' : 'Xuất sách';
+        this.btnStartTranslate.title = isPaper ? 'Dịch toàn bộ paper' : 'Dịch toàn bộ sách';
+        this.chaptersList.setAttribute('aria-label', `Danh sách ${label.toLowerCase()}`);
+        document.querySelector('label[for="chapterSearchInput"]').textContent = `Tìm ${label.toLowerCase()}`;
+        this.customInstructions.placeholder = isPaper
+            ? 'Ví dụ: Giữ nguyên ký hiệu toán học; thống nhất thuật ngữ chuyên ngành.'
+            : 'Ví dụ: Giữ nguyên tên riêng; xưng hô giữa hai nhân vật là tôi – cậu.';
+
+        const chapLabelEl = document.querySelector('.current-chap-label');
+        if (chapLabelEl) chapLabelEl.textContent = label;
+
+        if (this.chapterSearchInput) {
+            this.chapterSearchInput.placeholder = `Tìm ${label.toLowerCase()}…`;
+        }
+        if (this.btnTranslateCurrentChapter) {
+            this.btnTranslateCurrentChapter.textContent = `Dịch ${label.toLowerCase()}`;
+        }
+        if (this.btnRetranslateCurrentChapter) {
+            this.btnRetranslateCurrentChapter.textContent = isPaper ? 'Dịch lại mục' : 'Dịch lại';
+        }
+        if (!this.currentChapterId && this.activeChapterTitle) {
+            this.activeChapterTitle.textContent = `Chọn một ${label.toLowerCase()} để bắt đầu`;
+        }
+
+        const acadOpt = this.toneSelect ? this.toneSelect.querySelector('option[value="academic"]') : null;
+        if (this.toneSelect) {
+            if (isPaper) {
+                if (acadOpt) { acadOpt.hidden = false; acadOpt.disabled = false; }
+                this.toneSelect.value = 'academic';
+                this.toneSelect.disabled = true;
+            } else if (isNovel) {
+                if (acadOpt) { acadOpt.hidden = true; acadOpt.disabled = true; }
+                this.toneSelect.disabled = false;
+                if (this.toneSelect.value === 'academic') {
+                    this.toneSelect.value = 'novel';
+                }
+            } else {
+                if (acadOpt) { acadOpt.hidden = false; acadOpt.disabled = false; }
+                this.toneSelect.disabled = false;
+            }
+        }
+
+        if (this.groupCharacterSettings) {
+            this.groupCharacterSettings.classList.toggle('hidden', isPaper);
+        }
+    }
+
+    renderStructureWarnings(warnings) {
+        if (!this.structureWarningsPanel || !this.structureWarningsList) return;
+        this.structureWarningsList.textContent = '';
+        const list = Array.isArray(warnings) ? warnings.filter(Boolean) : [];
+        if (list.length === 0) {
+            this.structureWarningsPanel.classList.add('hidden');
+            return;
+        }
+        for (const item of list) {
+            const li = document.createElement('li');
+            li.className = 'structure-warning-item';
+            li.textContent = typeof item === 'string' ? item : (item.message || item.text || JSON.stringify(item));
+            this.structureWarningsList.appendChild(li);
+        }
+        this.structureWarningsPanel.classList.remove('hidden');
+    }
+
+    async loadProjects(preferredProjectId = null) {
         try {
             const res = await fetch('/api/projects');
             const projects = await res.json();
 
             this.projectSelect.innerHTML = '';
             if (projects.length === 0) {
-                this.projectSelect.innerHTML = '<option value="">-- Chưa có sách nào, hãy tải lên --</option>';
-                this.showModal(this.uploadModal);
+                this.projectSelect.innerHTML = '<option value="">-- Chưa có tài liệu nào, hãy tải lên --</option>';
+                this.openUploadModal('novel');
                 return;
             }
 
             for (const p of projects) {
                 const opt = document.createElement('option');
                 opt.value = p.id;
-                opt.textContent = `${p.title} (${p.progress_percent}%)`;
+                const docType = this.normalizeDocType(p);
+                const prefix = docType === 'paper' ? '[Paper]' : (docType === 'textbook' ? '[Textbook]' : '[Novel]');
+                opt.textContent = `${prefix} ${p.title} (${p.progress_percent}%)`;
                 this.projectSelect.appendChild(opt);
             }
 
-            if (projects.length > 0) this.selectProject(projects[0].id);
+            const targetId = (preferredProjectId && projects.some(p => p.id === preferredProjectId))
+                ? preferredProjectId
+                : (this.currentProjectId && projects.some(p => p.id === this.currentProjectId)
+                    ? this.currentProjectId
+                    : projects[0].id);
+
+            await this.selectProject(targetId);
         } catch (e) {
             this.appendLog('error', `Lỗi tải danh sách dự án: ${e.message}`);
         }
@@ -656,33 +842,73 @@ class BookTranslatorApp {
 
     async selectProject(projectId) {
         if (!projectId) return;
+        if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+        this._chapterSwitchToken += 1;
+        this.currentProject = null;
+        this._loadedCharacters = [];
+        this.renderCharacters([]);
+        this.renderTerms([]);
+        this.customInstructions.value = '';
+        this.btnSaveGlossary.disabled = true;
+        this.chaptersList.textContent = '';
         this.currentProjectId = projectId;
         this.projectSelect.value = projectId;
 
-        await this.loadProjectDetails(projectId, true);
-        await this.loadGlossary(projectId);
-        this.startStatusPolling(projectId);
+        // Clear old chapter content immediately even if new project has no chapters
+        this.currentChapterId = null;
+        this.currentChapter = null;
+        if (this.activeChapterTitle) {
+            this.activeChapterTitle.textContent = 'Chọn một mục để bắt đầu';
+        }
+        if (this.studioParagraphs) {
+            this.studioParagraphs.innerHTML = '<div class="empty-placeholder">Chọn một mục để xem và chỉnh sửa bản dịch song ngữ</div>';
+        }
+        if (this.readerBody) {
+            this.readerBody.innerHTML = '<div class="empty-placeholder">Nội dung mục sẽ hiển thị tại đây khi được chọn.</div>';
+        }
+        this.renderStructureWarnings([]);
+
+        // Guard tokens against stale responses
+        this._projectSwitchToken = (this._projectSwitchToken || 0) + 1;
+        const switchToken = this._projectSwitchToken;
+
+        await this.loadProjectDetails(projectId, true, switchToken);
+        await this.loadGlossary(projectId, switchToken);
+        if (switchToken === this._projectSwitchToken && this.currentProjectId === projectId) {
+            this.startStatusPolling(projectId);
+        }
     }
 
-    async loadProjectDetails(projectId, autoSelectFirstChapter = true) {
+    async loadProjectDetails(projectId, autoSelectFirstChapter = true, switchToken = null) {
         try {
             const res = await fetch(`/api/projects/${projectId}`);
             if (!res.ok) throw new Error('Không thể tải thông tin sách');
             const data = await res.json();
+
+            // Guard against stale response
+            if (switchToken !== null && switchToken !== this._projectSwitchToken) return;
+            if (this.currentProjectId !== projectId) return;
+
             this.currentProject = data;
+            const docType = this.normalizeDocType(data);
+            document.body.dataset.doctype = docType;
+            this.updateDocTypeUI(docType);
 
             this.projectTitleDisplay.textContent = data.title;
             this.updateGlobalProgress(data.progress_percent);
             this.chapterCountBadge.textContent = data.total_chapters;
             this.updateTranslatingStatus(data.is_translating);
 
+            this.renderStructureWarnings(data.structure_warnings || []);
             this.renderChaptersList(data.chapters);
 
-            if (autoSelectFirstChapter && data.chapters.length > 0) {
+            if (autoSelectFirstChapter && data.chapters && data.chapters.length > 0) {
                 this.selectChapter(data.chapters[0].id);
             }
         } catch (e) {
-            this.appendLog('error', e.message);
+            if (switchToken === null || switchToken === this._projectSwitchToken) {
+                this.appendLog('error', e.message);
+            }
         }
     }
 
@@ -743,23 +969,31 @@ class BookTranslatorApp {
 
     async selectChapter(chapterId) {
         this.currentChapterId = chapterId;
+        const projId = this.currentProjectId;
 
         const allItems = this.chaptersList.querySelectorAll('.chapter-item');
         allItems.forEach(i => { i.classList.remove('active'); i.removeAttribute('aria-current'); });
         const activeItem = document.getElementById(`chap_item_${chapterId}`);
         if (activeItem) { activeItem.classList.add('active'); activeItem.setAttribute('aria-current', 'page'); }
 
+        this._chapterSwitchToken = (this._chapterSwitchToken || 0) + 1;
+        const chapToken = this._chapterSwitchToken;
+
         try {
-            const res = await fetch(`/api/projects/${this.currentProjectId}/chapters/${chapterId}`);
+            const res = await fetch(`/api/projects/${projId}/chapters/${chapterId}`);
             if (!res.ok) throw new Error('Không thể tải chi tiết chương');
             const data = await res.json();
-            this.currentChapter = data;
 
+            if (chapToken !== this._chapterSwitchToken || this.currentProjectId !== projId) return;
+
+            this.currentChapter = data;
             this.activeChapterTitle.textContent = data.title;
             this.renderStudioView();
             this.renderReaderView();
         } catch (e) {
-            this.appendLog('error', e.message);
+            if (chapToken === this._chapterSwitchToken && this.currentProjectId === projId) {
+                this.appendLog('error', e.message);
+            }
         }
     }
 
@@ -882,18 +1116,27 @@ class BookTranslatorApp {
 
     renderReaderView() {
         this.readerBody.innerHTML = '';
+        const isPaper = this.currentProject && this.normalizeDocType(this.currentProject) === 'paper';
         if (!this.currentChapter || !this.currentChapter.paragraphs.length) {
             const noContent = document.createElement('p');
             noContent.className = 'reader-notice';
-            noContent.textContent = 'Không có nội dung để hiển thị.';
+            noContent.textContent = isPaper ? 'Không có nội dung mục để hiển thị.' : 'Không có nội dung để hiển thị.';
             this.readerBody.appendChild(noContent);
             return;
         }
 
-        const isPreamble = ['phần mở đầu / tiêu đề', 'title', 'header'].includes(
-            (this.currentChapter.title || '').trim().toLowerCase()
-        );
-        if (!isPreamble) {
+        const chapTitle = (this.currentChapter.title || '').trim();
+        const chapTitleLower = chapTitle.toLowerCase();
+        const isPreamble = ['phần mở đầu / tiêu đề', 'title', 'header'].includes(chapTitleLower);
+
+        const firstPara = this.currentChapter.paragraphs && this.currentChapter.paragraphs[0];
+        const headingTags = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'];
+        const firstParaIsHeadingAndMatches = firstPara &&
+            firstPara.tag &&
+            headingTags.includes(firstPara.tag.toLowerCase()) &&
+            (firstPara.original_text || '').trim().toLowerCase() === chapTitleLower;
+
+        if (!isPreamble && !firstParaIsHeadingAndMatches && chapTitle) {
             const titleH2 = document.createElement('h2');
             titleH2.textContent = this.currentChapter.title;
             this.readerBody.appendChild(titleH2);
@@ -1057,7 +1300,7 @@ class BookTranslatorApp {
             }
 
             const hasVi = p.translated_text && p.translated_text.trim();
-            const isHeading = p.tag && ['h1', 'h2', 'h3', 'h4'].includes(p.tag);
+            const isHeading = p.tag && ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(p.tag.toLowerCase());
 
             if (this.readerDisplayMode === 'bilingual') {
                 const pair = document.createElement('div');
@@ -1191,16 +1434,33 @@ class BookTranslatorApp {
 
     // --- GLOSSARY & CHARACTER PRONOUNS ---
 
-    async loadGlossary(projectId) {
+    async loadGlossary(projectId, switchToken = null) {
         try {
             const res = await fetch(`/api/projects/${projectId}/glossary`);
+            if (!res.ok) throw new Error('Không thể tải bảng thuật ngữ');
             const data = await res.json();
-            this.toneSelect.value = data.tone || 'novel';
+
+            if (switchToken !== null && switchToken !== this._projectSwitchToken) return;
+            if (this.currentProjectId !== projectId) return;
+
+            const docType = this.normalizeDocType(this.currentProject);
+            if (docType === 'paper') {
+                this.toneSelect.value = 'academic';
+            } else if (docType === 'novel') {
+                this.toneSelect.value = (data.tone === 'academic') ? 'novel' : (data.tone || 'novel');
+            } else {
+                this.toneSelect.value = data.tone || 'novel';
+            }
+
             this.customInstructions.value = data.custom_instructions || '';
-            this.renderCharacters(data.characters || []);
+            this._loadedCharacters = data.characters || [];
+            this.renderCharacters(this._loadedCharacters);
             this.renderTerms(data.terms || []);
+            this.btnSaveGlossary.disabled = false;
         } catch (e) {
-            this.appendLog('error', `Lỗi tải bảng thuật ngữ: ${e.message}`);
+            if (switchToken === null || switchToken === this._projectSwitchToken) {
+                this.appendLog('error', `Lỗi tải bảng thuật ngữ: ${e.message}`);
+            }
         }
     }
 
@@ -1339,23 +1599,29 @@ class BookTranslatorApp {
     }
 
     async saveGlossary() {
-        if (!this.currentProjectId) return;
+        if (!this.currentProjectId || !this.currentProject || this.btnSaveGlossary.disabled) return;
 
-        const characters = [];
-        this.characterList.querySelectorAll('.char-card').forEach(card => {
-            const name = card.querySelector('.char-input-name').value.trim();
-            const pronounStr = card.querySelector('.char-input-pronoun').value.trim();
-            const role = card.querySelector('.char-input-role').value.trim();
-            if (name) {
-                const parts = pronounStr.split(/[-–\/]/).map(s => s.trim());
-                characters.push({
-                    name, gender: 'unknown', role,
-                    first_person: parts[0] || 'tôi',
-                    second_person: parts[1] || 'cậu',
-                    third_person: name, notes: ''
-                });
-            }
-        });
+        let characters = [];
+        const isPaper = this.currentProject && this.normalizeDocType(this.currentProject) === 'paper';
+        if (isPaper) {
+            characters = this._loadedCharacters || [];
+        } else {
+            this.characterList.querySelectorAll('.char-card').forEach(card => {
+                const name = card.querySelector('.char-input-name').value.trim();
+                const pronounStr = card.querySelector('.char-input-pronoun').value.trim();
+                const role = card.querySelector('.char-input-role').value.trim();
+                if (name) {
+                    const parts = pronounStr.split(/[-–\/]/).map(s => s.trim());
+                    characters.push({
+                        name, gender: 'unknown', role,
+                        first_person: parts[0] || 'tôi',
+                        second_person: parts[1] || 'cậu',
+                        third_person: name, notes: ''
+                    });
+                }
+            });
+            this._loadedCharacters = characters;
+        }
 
         const terms = [];
         this.termsList.querySelectorAll('.term-card').forEach(card => {
@@ -1387,27 +1653,59 @@ class BookTranslatorApp {
 
     async handleFileUpload(file) {
         if (!file) return;
+
+        if (this.bookFileInput) {
+            this.bookFileInput.value = '';
+        }
+
+        if (this.isUploading) return;
+
+        const fileName = (file.name || '').toLowerCase();
+        const ext = fileName.includes('.') ? '.' + fileName.split('.').pop() : '';
+        const allowedExts = this.uploadType === 'paper' ? ['.pdf'] : ['.epub', '.docx', '.txt', '.md'];
+
+        if (!allowedExts.includes(ext)) {
+            const expected = this.uploadType === 'paper' ? 'file PDF (.pdf)' : 'EPUB, DOCX, TXT hoặc MD';
+            const msg = `Định dạng không hợp lệ. Chế độ ${this.uploadType === 'paper' ? 'Paper' : 'Novel'} chỉ nhận ${expected}.`;
+            this.uploadProgressContainer.classList.remove('hidden');
+            if (this.uploadProgressTrack) this.uploadProgressTrack.classList.add('hidden');
+            this.uploadStatusText.textContent = msg;
+            this.appendLog('error', msg);
+            return;
+        }
+
+        this.isUploading = true;
+        this._setUploadControlsLocked(true);
+
         this.uploadProgressContainer.classList.remove('hidden');
-        this.uploadStatusText.textContent = `Đang phân tích sách: ${file.name}...`;
+        if (this.uploadProgressTrack) this.uploadProgressTrack.classList.remove('hidden');
+        this.uploadStatusText.textContent = `Đang phân tích tài liệu: ${file.name}...`;
 
         const formData = new FormData();
         formData.append('file', file);
+        formData.append('document_type', this.uploadType);
 
         try {
             const res = await fetch('/api/projects/upload', { method: 'POST', body: formData });
             if (!res.ok) {
-                const err = await res.json();
+                const err = await res.json().catch(() => ({}));
                 throw new Error(err.detail || 'Lỗi tải sách');
             }
             const data = await res.json();
-            this.appendLog('success', `Đã nạp thành công cuốn sách: "${data.title}" (${data.chapters_count} chương, ${data.paragraphs_count} đoạn)`);
+            const isPaper = data.document_type === 'paper';
+            const unitName = isPaper ? 'mục' : 'chương';
+            const typeName = isPaper ? 'bài báo' : 'sách';
+            this.appendLog('success', `Đã nạp thành công ${typeName}: "${data.title}" (${data.chapters_count} ${unitName}, ${data.paragraphs_count} đoạn)`);
             this.hideModal(this.uploadModal);
             this.uploadProgressContainer.classList.add('hidden');
-            await this.loadProjects();
-            this.selectProject(data.project_id);
+            await this.loadProjects(data.project_id);
         } catch (e) {
+            if (this.uploadProgressTrack) this.uploadProgressTrack.classList.add('hidden');
             this.uploadStatusText.textContent = `Thất bại: ${e.message}`;
             this.appendLog('error', `Lỗi tải file: ${e.message}`);
+        } finally {
+            this.isUploading = false;
+            this._setUploadControlsLocked(false);
         }
     }
 

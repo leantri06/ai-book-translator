@@ -79,6 +79,9 @@ class ProjectManager:
                 try:
                     with open(meta_file, "r", encoding="utf-8") as f:
                         meta = json.load(f)
+                    if not meta.get("document_type"):
+                        meta["document_type"] = "paper" if meta.get("source_format") == "pdf" else "novel"
+                    meta.setdefault("structure_warnings", [])
                     projects.append(meta)
                 except Exception:
                     continue
@@ -129,7 +132,9 @@ class ProjectManager:
             "total_words": project.total_words,
             "progress_percent": project.progress_percent,
             "created_at": project.created_at or time.strftime("%Y-%m-%d %H:%M:%S"),
-            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S")
+            "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "document_type": project.document_type,
+            "structure_warnings": list(project.structure_warnings),
         }
 
         atomic_write_json(meta_file, meta)
@@ -169,6 +174,13 @@ class ProjectManager:
                     )
                     chapters.append(chap)
 
+        # Resolve document_type: use stored value, or infer for legacy projects
+        doc_type = meta.get("document_type", "")
+        if not doc_type:
+            # Legacy inference: PDF -> paper, everything else -> novel
+            fmt = meta.get("source_format", "epub")
+            doc_type = "paper" if fmt == "pdf" else "novel"
+
         return BookProject(
             id=meta["id"],
             title=meta["title"],
@@ -178,7 +190,9 @@ class ProjectManager:
             cover_image_path=meta.get("cover_image_path", ""),
             chapters=chapters,
             created_at=meta.get("created_at", ""),
-            updated_at=meta.get("updated_at", "")
+            updated_at=meta.get("updated_at", ""),
+            document_type=doc_type,
+            structure_warnings=meta.get("structure_warnings", []),
         )
 
     @classmethod
