@@ -19,9 +19,11 @@ venv/
 *.env
 *.log
 
-# IDE & OS
+# IDE, OS & AI Agents
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 scratch/
+.agents/
+.claude/

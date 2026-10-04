@@ -23,7 +23,7 @@ from core.textbook_parser import TextbookParser
 from server.database import ProjectManager, PROJECTS_DIR, SETTINGS_FILE, project_path, atomic_write_json
 from server.translator_worker import worker_instance
 
-app = FastAPI(title="AI Book Translator Pro", version="2.0")
+app = FastAPI(title="AI Book Translator Pro", version="4.1.0")
 
 @app.middleware("http")
 async def validate_project_path(request: Request, call_next):

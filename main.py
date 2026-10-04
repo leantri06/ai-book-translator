@@ -86,7 +86,7 @@ def main():
     host = "127.0.0.1"
     default_port = 8000
 
-    print("   AI BOOK & RESEARCH PAPER TRANSLATOR PRO - V3.5")
+    print("   AI BOOK & RESEARCH PAPER TRANSLATOR PRO - V4.1")
     print("   Phan mem dich sach & bai bao khoa hoc chuyen nghiep")
     print("-------------------------------------------------------")
 

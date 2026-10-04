@@ -1,30 +1,37 @@
 @echo off
 chcp 65001 >nul
-title AI Book and Research Paper Translator Pro (V3.5)
+title AI Book and Research Paper Translator Pro (V4.1)
 color 0B
 echo =======================================================
 echo        AI BOOK AND RESEARCH PAPER TRANSLATOR PRO
 echo    Phan mem dich sach va bai bao khoa hoc chuyen nghiep
-echo                     Phien ban 3.5
+echo                     Phien ban 4.1
 echo =======================================================
 echo.
 
 cd /d "%~dp0"
 
-REM 1. Kiem tra Python
-set "PY_CMD=python"
-python --version >nul 2>&1
-if errorlevel 1 (
-    py --version >nul 2>&1
-    if errorlevel 1 (
-        echo [LOI] Khong tim thay Python tren he thong!
-        echo Vui long cai dat Python 3.10 tro len tu https://www.python.org/
-        echo - Luu y: Nho tich chon "Add python.exe to PATH" khi cai dat.
-        echo.
-        pause
-        exit /b 1
+REM 1. Kiem tra Python (Uu tien moi truong ao .venv neu ton tai)
+set "PY_CMD="
+if exist ".venv\Scripts\python.exe" (
+    set "PY_CMD=.\.venv\Scripts\python.exe"
+    echo [THONG TIN] Su dung Python tu moi truong ao: .venv
+) else (
+    python --version >nul 2>&1
+    if not errorlevel 1 (
+        set "PY_CMD=python"
     ) else (
-        set "PY_CMD=py"
+        py --version >nul 2>&1
+        if not errorlevel 1 (
+            set "PY_CMD=py"
+        ) else (
+            echo [LOI] Khong tim thay Python tren he thong!
+            echo Vui long cai dat Python 3.10 tro len tu https://www.python.org/
+            echo - Luu y: Nho tich chon "Add python.exe to PATH" khi cai dat.
+            echo.
+            pause
+            exit /b 1
+        )
     )
 )
 
